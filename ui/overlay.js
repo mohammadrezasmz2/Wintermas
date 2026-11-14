@@ -14,6 +14,7 @@ import { shedOnWindowMotion, naturalSnowHeights, keepBallAboveTaskbar, canStackB
 import { santaStops, bladeCrosses, isOnBottomSurface } from './santa-visit.js';
 import { shouldSpillMinimizedPile } from './window-snow.js';
 import { shakeSnowOffWindow } from './window-powder.js';
+import { titlebarWindowAt, draggedEnough, hideMovingWindowSnow } from './window-drag.js';
 import { snowDiameter, powderShares, setVisibleSnowDiameter } from './snow-diameter.js';
 import { dropTreeAt, fallTree } from './tree-physics.js';
 
@@ -41,6 +42,8 @@ let taskbars = [];
 let ground, plough, snowReady = false;
 let nextAutoPloughCheck = 0, lastPloughAt = -60_000;
 let lastDesktopSample;
+let movingWindowDrag;
+const movingWindowHoldUntil = new Map();
 let grabbed, grabOffset, capturing = false;
 let placement;
 let heldTree, frameRequest;
@@ -97,6 +100,8 @@ function applyWeather(before, next) {
   plough = undefined;
   fraction = 0;
   piles.clear();
+  movingWindowDrag = undefined;
+  movingWindowHoldUntil.clear();
   if (ground) {
     ground.profile.fill(0);
     ground.raster = undefined;
@@ -153,7 +158,7 @@ function releaseSnow(x, y, depth, vx, vy, avoidId = null) {
   }
 }
 
-function spill(pile) {
+function spill(pile, avoidId = null) {
   // Each three adjacent columns become one falling flurry on minimize.
   for (let index = 0; index < pile.profile.length; index += 3) {
     let depth = 0, count = 0;
@@ -164,9 +169,60 @@ function spill(pile) {
     if (depth < 0.12) continue;
     const x = pile.rect.left + (index + count / 2) * column + random(-5, 5);
     const y = pile.rect.top - depth / count - random(2, 9);
-    releaseSnow(x, y, depth * 0.9, random(-85, 85), random(-90, -12));
+    releaseSnow(x, y, depth * 0.9, random(-85, 85), random(-90, -12), avoidId);
   }
 }
+
+// React to titlebar input, not only window-geometry events. This protects
+// against the 1-2 DWM frames when a rapidly dragged window has already moved
+// but the native tracker still reports its previous rectangle.
+function updateWindowDrag(next, now, nativeMoving = null) {
+  if (settings.weather !== 'snow' || !next) return;
+  if (!next.pressed) {
+    if (movingWindowDrag?.moved)
+      movingWindowHoldUntil.set(movingWindowDrag.id, now + 340);
+    movingWindowDrag = undefined;
+    return;
+  }
+  // Native WM_ENTERSIZEMOVE tracking supplies the real HWND even if a fast
+  // mouse move outruns our next sampled window rectangle. It takes precedence
+  // over the pointer-based titlebar heuristic used by custom titlebars.
+  if (nativeMoving && rectangles.some(r => r.id === nativeMoving && !r.taskbar)) {
+    if (!movingWindowDrag || movingWindowDrag.id !== nativeMoving)
+      movingWindowDrag = { id: nativeMoving, startX: next.x,
+        startY: next.y, moved: true };
+    movingWindowDrag.moved = true;
+    const pile = piles.get(nativeMoving);
+    if (pile) {
+      spill(pile, nativeMoving);
+      piles.delete(nativeMoving);
+      sceneDirty = true;
+    }
+    movingWindowHoldUntil.set(nativeMoving, now + 340);
+    return;
+  }
+  if (!mouse.pressed) {
+    const candidate = titlebarWindowAt(rectangles, next);
+    movingWindowDrag = candidate ? {
+      id: candidate.id, startX: next.x, startY: next.y, moved: false,
+    } : undefined;
+  }
+  const drag = movingWindowDrag;
+  if (!drag) return;
+  if (!drag.moved && draggedEnough(drag, next)) {
+    drag.moved = true;
+    const pile = piles.get(drag.id);
+    if (pile) {
+      // The old ridge should become a powder shower at its ORIGINAL location,
+      // not a stale line that follows the cursor a few frames later.
+      spill(pile, drag.id);
+      piles.delete(drag.id);
+    }
+    sceneDirty = true;
+  }
+  if (drag.moved) movingWindowHoldUntil.set(drag.id, now + 340);
+}
+
 function desktop(frame) {
   if (!frame.rectangles) return;
   const now = performance.now();
@@ -175,6 +231,7 @@ function desktop(frame) {
   if (placement || geometryChanged(rectangles, frame.rectangles)) sceneDirty = true;
   rectangles = frame.rectangles;
   taskbars = rectangles.filter(rect => rect.taskbar);
+  updateWindowDrag(frame.mouse, now, frame.moving);
   if (settings.weather === 'autumn') {
     autumn.syncGeometry(rectangles, frame.minimized);
     autumn.onPointer(frame.mouse, elapsed);
@@ -187,8 +244,9 @@ function desktop(frame) {
       piles.delete(id);
     } else if (!next) {
       // Closed windows lose snow; minimized windows drop it into the desktop.
-      if (shouldSpillMinimizedPile(id, frame.minimized)) spill(pile);
+      if (shouldSpillMinimizedPile(id, frame.minimized)) spill(pile, id);
       piles.delete(id);
+      movingWindowHoldUntil.delete(id);
     } else {
       pile.lastSeen = now;
       const old = pile.rect;
@@ -208,7 +266,8 @@ function desktop(frame) {
         const dx = next.left - old.left;
         if (Math.abs(dy) >= 1.8) {
           const powder = shakeSnowOffWindow(pile.profile, dy);
-          pile.noSettleUntil = now + 280;
+          pile.noSettleUntil = now + 340;
+          movingWindowHoldUntil.set(id, now + 340);
           pile.raster = undefined;
           // Spread individual powder puffs across the whole former ridge.
           for (const particle of powder) {
@@ -276,6 +335,9 @@ function addPile(hit, amount = 1) {
   const { x } = hit;
   const rect = hit.rect.id === 'ground' ? bottomTaskbarAt(taskbars, x, height) ?? hit.rect : hit.rect;
   if (rect.taskbar && (!settings.taskbar || settings.paused)) return;
+  // Do not paint a new ridge using an obsolete rectangle while moving.
+  if (hideMovingWindowSnow(rect.id, movingWindowDrag, movingWindowHoldUntil,
+      performance.now())) return;
   if (rect.id !== 'ground' && !piles.has(rect.id)) {
     piles.set(rect.id, { rect, profile: new Float32Array(Math.ceil((rect.right - rect.left) / column)), kind: 'snow' });
   }
@@ -664,7 +726,8 @@ function paintPiles(now) {
   // Do not paint stale piles for windows omitted by the native tracker.
   rectangles.forEach((rect, z) => {
     const pile = piles.get(rect.id);
-    if (pile) paintProfile(pile, rectangles.slice(0, z), now);
+    if (pile && !hideMovingWindowSnow(rect.id, movingWindowDrag,
+        movingWindowHoldUntil, now)) paintProfile(pile, rectangles.slice(0, z), now);
   });
 }
 
@@ -1214,6 +1277,8 @@ wintermas.onAction(action => {
     }
   } else if (action === 'reset') {
     piles.clear();
+    movingWindowDrag = undefined;
+    movingWindowHoldUntil.clear();
     ground.profile.fill(0);
     ground.raster = undefined;
     particles = [];

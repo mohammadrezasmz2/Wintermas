@@ -20,6 +20,18 @@ static class Desktop {
     struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)]
     struct Point { public int X, Y; }
+    // Win32 reports the window in a native move/resize loop independently
+    // of the (possibly stale) DWM bounding rectangle.
+    [StructLayout(LayoutKind.Sequential)]
+    struct GuiThreadInfo {
+        public int cbSize;
+        public int flags;
+        public IntPtr hwndActive, hwndFocus, hwndCapture, hwndMenuOwner;
+        public IntPtr hwndMoveSize, hwndCaret;
+        public Rect rcCaret;
+    }
+    [DllImport("user32", SetLastError = true)]
+    static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
     delegate bool WindowCallback(IntPtr hwnd, IntPtr data);
     [DllImport("user32")] static extern bool EnumWindows(WindowCallback callback, IntPtr data);
     [DllImport("user32")] static extern bool IsWindowVisible(IntPtr hwnd);
@@ -94,8 +106,18 @@ static class Desktop {
             }, IntPtr.Zero);
             bool pressed = GetAsyncKeyState(1) < 0;
             bool control = GetAsyncKeyState(0x11) < 0;
+            string movingWindow = "null";
+            if (pressed) {
+                var gui = new GuiThreadInfo();
+                gui.cbSize = Marshal.SizeOf(typeof(GuiThreadInfo));
+                if (GetGUIThreadInfo(0, ref gui) && gui.hwndMoveSize != IntPtr.Zero) {
+                    movingWindow = string.Format(CultureInfo.InvariantCulture,
+                        "\"{0:X}\"", gui.hwndMoveSize.ToInt64());
+                }
+            }
             string snapshot = "{\"pressed\":" + (pressed ? "true" : "false") +
                 ",\"control\":" + (control ? "true" : "false") +
+                ",\"moving\":" + movingWindow +
                 ",\"minimized\":[" + string.Join(",", minimized) + "]" +
                 ",\"windows\":[" + string.Join(",", windows) + "]}";
             Point cursor;

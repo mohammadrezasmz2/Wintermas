@@ -77,7 +77,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: v0.2.1-preview.12
+          RELEASE_TAG: v0.2.1-preview.13
         run: |
-          gh release create $env:RELEASE_TAG 'dist/setup/Wintermas-Setup.exe' 'dist/setup/Wintermas-Setup.exe.sha256' --target $env:GITHUB_SHA --title 'Wintermas 0.2.1 Preview 12 — standard NSIS installer' --prerelease --notes 'Security-focused packaging change: direct, standard electron-builder NSIS installer rather than a custom wrapper that extracts and executes another installer from a temp directory. Includes Windows install smoke test and SHA-256 checksum. IMPORTANT: this preview is unsigned. An antivirus detection cannot be assumed to be a false positive; do not bypass security warnings. For a trusted publisher identity, a valid code-signing certificate is required.'
+          gh release create $env:RELEASE_TAG 'dist/setup/Wintermas-Setup.exe' 'dist/setup/Wintermas-Setup.exe.sha256' --target $env:GITHUB_SHA --title 'Wintermas 0.2.1 Preview 13 — no stale snow while dragging' --prerelease --notes 'Preview 13: prevent snowbanks lingering at old screen coordinates while windows are dragged rapidly; detect native move loops and titlebar mouse drag, immediately release powder and temporarily suppress stale window snow. Direct standard NSIS installer with install smoke test and SHA-256 checksum. IMPORTANT: unsigned preview; do not bypass antivirus warnings.'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
