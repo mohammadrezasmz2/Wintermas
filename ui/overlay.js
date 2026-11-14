@@ -12,6 +12,8 @@ import { clipPrecipitation } from './precipitation-mask.js';
 import { shedOnWindowMotion, naturalSnowHeights, keepBallAboveTaskbar, canStackBall, needsAutoPlough, sweepSnowProfile, bladeTouchesBall } from './snow-behavior.js';
 import { santaStops, bladeCrosses, isOnBottomSurface } from './santa-visit.js';
 import { shouldSpillMinimizedPile } from './window-snow.js';
+import { shakeSnowOffWindow } from './window-powder.js';
+import { dropTreeAt, fallTree } from './tree-physics.js';
 
 const canvas = document.querySelector('canvas');
 const ctx = canvas.getContext('2d');
@@ -187,24 +189,39 @@ function desktop(frame) {
         pile.raster = undefined;
       }
       if (!next.taskbar) {
-        const motion = shedOnWindowMotion(pile.profile, {
-          dx: next.left - old.left, dy: next.top - old.top,
-          lastVx: pile.vx ?? 0, lastVy: pile.vy ?? 0,
-        }, elapsed);
-        pile.vx = motion.vx;
-        pile.vy = motion.vy;
-        for (const chunk of motion.dislodged) {
-          const x = next.left + (chunk.index + 0.5) * column;
-          // When moving UP, launch from the OLD location, so chunks visibly
-          // lag behind the ascending window instead of reattaching to it.
-          // Emit above the NEW rim: chunks drawn inside the open window are
-          // correctly occluded and would otherwise appear to stay glued to it.
-          const y = next.top - Math.max(8, pile.profile[chunk.index]) - random(7, 16);
-          const launchVy = next.top < old.top
-            ? Math.min(-65, chunk.vy - 125) : chunk.vy - 65;
-          releaseSnow(x, y, chunk.amount, chunk.vx + random(-55, 55),
-            launchVy + random(-35, 5), id);
+        const dy = next.top - old.top;
+        const dx = next.left - old.left;
+        if (Math.abs(dy) >= 1.8) {
+          const powder = shakeSnowOffWindow(pile.profile, dy);
+          pile.noSettleUntil = now + 280;
+          pile.raster = undefined;
+          // Spread individual powder puffs across the whole former ridge.
+          for (const particle of powder) {
+            const x = next.left + particle.column * column + random(-6, 6);
+            const y = Math.min(next.top, old.top) - random(9, 28);
+            if (accents.length >= 760) break;
+            releaseSnow(x, y, particle.mass, random(-110, 110),
+              random(-145, -55), id);
+            const puff = accents[accents.length - 1];
+            if (puff?.kind === 'chunk') {
+              puff.size = random(0.8, 2.0);
+              puff.alpha = random(0.62, 0.98);
+            }
+          }
+        } else {
+          const motion = shedOnWindowMotion(pile.profile, {
+            dx, dy, lastVx: pile.vx ?? 0, lastVy: pile.vy ?? 0,
+          }, elapsed);
+          pile.vx = motion.vx;
+          pile.vy = motion.vy;
+          for (const chunk of motion.dislodged) {
+            const x = next.left + (chunk.index + 0.5) * column;
+            releaseSnow(x, next.top - Math.max(8, pile.profile[chunk.index]) -
+              random(7, 16), chunk.amount, chunk.vx + random(-55, 55),
+              chunk.vy - random(50, 100), id);
+          }
         }
+        if (dx || dy) pile.raster = undefined;
       }
       pile.rect = next;
     }
@@ -246,7 +263,10 @@ function addPile(hit, amount = 1) {
   if (rect.id !== 'ground' && !piles.has(rect.id)) {
     piles.set(rect.id, { rect, profile: new Float32Array(Math.ceil((rect.right - rect.left) / column)), kind: 'snow' });
   }
-  const { profile } = rect.id === 'ground' ? ground : piles.get(rect.id);
+  const targetPile = rect.id === 'ground' ? ground : piles.get(rect.id);
+  // Do not immediately regrow the thin line while a window is being dragged.
+  if (targetPile.noSettleUntil && performance.now() < targetPile.noSettleUntil) return;
+  const { profile } = targetPile;
   const center = Math.max(0, Math.min(profile.length - 1, Math.floor((x - rect.left) / column)));
   for (let dx = -2; dx <= 2; dx++) {
     const i = center + dx;
@@ -323,7 +343,7 @@ function updateParticles(dt) {
             color: ['#ba354e', '#3d8b6c', '#4368a7'][p.stopIndex % 3], fromSanta: true });
         } else if (stop.kind === 'tree') {
           trees.push({ anchor: { x: stop.x, y: support.top }, color: 'classic',
-            fromSanta: true });
+            fromSanta: true, onBottom: true, falling: false, vy: 0 });
           if (trees.length > 16) trees.shift();
         }
         sceneDirty = true;
@@ -356,9 +376,29 @@ function updateParticles(dt) {
     return p.life > 0 && p.y < height + 60;
   });
   accents.push(...trail);
+  updateTrees(dt);
   updateSnowProps(dt, byId);
   updateGifts(dt, byId);
   dispatchQueuedSantaVisit();
+}
+
+function updateTrees(dt) {
+  for (const tree of trees) {
+    if (tree === heldTree?.tree || plough?.carriedTrees.includes(tree)) continue;
+    if (tree.anchor?.id && !rectangles.some(r => r.id === tree.anchor.id)) {
+      // The former support vanished; let this tree fall rather than freeze.
+      tree.anchor = { x: tree.lastX ?? width / 2, y: tree.lastY ?? 0 };
+      tree.falling = true;
+      tree.vy = 0;
+    }
+    const world = resolveAnchor(tree.anchor);
+    if (world) { tree.lastX = world.x; tree.lastY = world.y; }
+    if (fallTree(tree, dt, rectangles, x => bottomSurfaceAt(x).top)) {
+      const next = resolveAnchor(tree.anchor);
+      if (next) { tree.lastX = next.x; tree.lastY = next.y; }
+      sceneDirty = true;
+    }
+  }
 }
 
 function updateGifts(dt, byId) {
@@ -425,7 +465,7 @@ function updatePointer(next, elapsed) {
     const anchor = anchorAt(next);
     placement.deadline = performance.now() + 25000;
     if (placement.kind === 'tree') {
-      trees.push({ anchor, color: placement.color });
+      trees.push({ ...dropTreeAt(next, rectangles), color: placement.color });
       if (trees.length > 16) trees.shift();
       cancelPlacement();
     } else if (placement.start) {
@@ -447,20 +487,26 @@ function updatePointer(next, elapsed) {
   if (heldTree) {
     const { tree, offset } = heldTree;
     const point = { x: next.x + offset.x, y: next.y + offset.y };
-    tree.anchor = next.pressed ? point : anchorAt(point);
     if (next.pressed) {
+      tree.anchor = point;
+      tree.falling = false;
+      tree.onBottom = false;
+      tree.vy = 0;
       const target = Math.max(-.28, Math.min(.28, -dx / elapsed * .001));
       tree.leanTarget = target;
     }
     if (!next.pressed) {
+      Object.assign(tree, dropTreeAt(point, rectangles));
       tree.leanTarget = 0;
       heldTree = undefined;
       capturePointer(false);
+      sceneDirty = true;
     }
     return;
   }
   if (!grabbed && (!next.pressed || clicked)) {
     const tree = trees.findLast(candidate => {
+      if (plough?.carriedTrees.includes(candidate)) return false;
       const point = resolveAnchor(candidate.anchor);
       if (!point) return false;
       const fromBase = point.y - next.y;
@@ -575,7 +621,8 @@ function updatePileRaster(pile, now) {
 
 function paintProfile(pile, covers, now) {
   const { rect, profile } = pile;
-  if (!profile.some(depth => depth > 0.05)) return;
+  // Subpixel residue must not appear as a bright horizontal hairline.
+  if (!profile.some(depth => depth > 1.15)) return;
   const raster = updatePileRaster(pile, now);
   if (!raster) return;
   const top = rect.top - raster.baseline;
@@ -725,6 +772,9 @@ function updateSnowProps(dt, byId) {
       if (bladeCrosses(previousBlade, blade, anchor.x, 55)) {
         tree.anchor = { x: anchor.x, y: anchor.y };
         tree.leanTarget = -0.2;
+        tree.falling = false;
+        tree.onBottom = false;
+        tree.vy = 0;
         plough.carriedTrees.push(tree);
       }
     }
@@ -748,6 +798,8 @@ function updateSnowProps(dt, byId) {
     for (const tree of plough.carriedTrees) {
       const x = plough.x - 83 - carriedOffset;
       tree.anchor = { x, y: bottomSurfaceAt(Math.max(0, Math.min(width - 1, x))).top };
+      tree.falling = false;
+      tree.onBottom = false;
       tree.leanTarget = -0.08;
       carriedOffset += 75;
     }
@@ -1063,7 +1115,8 @@ function frame(timestamp) {
   const fastScene = !snowRenderer && particles.length || grabbed || heldTree || plough ||
     accents.length || balls.some(ball => !ball.support || Math.abs(ball.vx) > 1) ||
     gifts.some(gift => !gift.support) || garlands.some(garland => garland.rope.active > 0) ||
-    trees.some(tree => Math.abs(tree.tilt ?? 0) > .003 || Math.abs(tree.velocity ?? 0) > .02) ||
+    trees.some(tree => tree.falling || Math.abs(tree.tilt ?? 0) > .003 ||
+      Math.abs(tree.velocity ?? 0) > .02) ||
     rain.fast();
   if (sceneNeeded && (fastScene || sceneDirty || previousScene === undefined ||
       now - previousScene >= staticSceneInterval())) {
