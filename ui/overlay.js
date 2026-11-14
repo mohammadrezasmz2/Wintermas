@@ -9,7 +9,7 @@ import { createRain } from './rain.js';
 import { createFramePacer } from './frame-pacing.js';
 import { createPerfMonitor } from './perf-monitor.js';
 import { clipPrecipitation } from './precipitation-mask.js';
-import { shedOnWindowMotion, naturalSnowHeights, keepBallAboveTaskbar, canStackBall, needsAutoPlough } from './snow-behavior.js';
+import { shedOnWindowMotion, naturalSnowHeights, keepBallAboveTaskbar, canStackBall, needsAutoPlough, sweepSnowProfile, bladeTouchesBall } from './snow-behavior.js';
 
 const canvas = document.querySelector('canvas');
 const ctx = canvas.getContext('2d');
@@ -123,9 +123,11 @@ function bottomSurfaceAt(x) {
   return bottomTaskbarAt(taskbars, x, height) ?? ground.rect;
 }
 
-function releaseSnow(x, y, depth, vx, vy) {
+function releaseSnow(x, y, depth, vx, vy, avoidId = null) {
+  if (accents.length > 780) return;
   accents.push({
     kind: 'chunk', x, y, vx, vy, alpha: 0.94, deposit: depth,
+    avoidId, avoidFor: avoidId ? 0.75 : 0,
     size: Math.min(7, Math.sqrt(depth) * 1.6),
   });
 }
@@ -181,8 +183,11 @@ function desktop(frame) {
         pile.vy = motion.vy;
         for (const chunk of motion.dislodged) {
           const x = next.left + (chunk.index + 0.5) * column;
-          releaseSnow(x, next.top - pile.profile[chunk.index] - 2,
-            chunk.amount, chunk.vx + random(-28, 28), chunk.vy);
+          // When moving UP, launch from the OLD location, so chunks visibly
+          // lag behind the ascending window instead of reattaching to it.
+          const y = Math.max(next.top - 16, old.top - pile.profile[chunk.index] - 3);
+          releaseSnow(x, y, chunk.amount, chunk.vx + random(-55, 55),
+            chunk.vy + random(-35, 10), id);
         }
       }
       pile.rect = next;
@@ -309,8 +314,11 @@ function updateParticles(dt) {
       p.vy += dt * 420;
       p.x = Math.max(0, Math.min(width - 0.01, p.x + p.vx * dt));
       p.y += p.vy * dt;
-      const hit = landing(rectangles, x0, y0, p.x, p.y, settings.taskbar);
-      const surface = hit ?? (p.y >= height ? { rect: ground.rect, x: p.x } : null);
+      p.avoidFor = Math.max(0, (p.avoidFor ?? 0) - dt);
+      const landingRects = p.avoidFor && p.avoidId
+        ? rectangles.filter(rect => rect.id !== p.avoidId) : rectangles;
+      const hit = landing(landingRects, x0, y0, p.x, p.y, settings.taskbar);
+      const surface = hit ?? (p.y >= height ? { rect: bottomSurfaceAt(p.x), x: p.x } : null);
       if (!surface) return true;
       addPile(surface, p.deposit / 3.42);
       return false;
@@ -593,7 +601,7 @@ function alignStack(root) {
 
 function startPlough() {
   if (plough || settings.weather === 'rain') return;
-  plough = { x: width + 70, heap: new Float32Array(18) };
+  plough = { x: width + 70, load: 0, carried: [] };
   lastPloughAt = performance.now();
 }
 
@@ -616,36 +624,54 @@ function findSnowballBase(ball) {
 
 function updateSnowProps(dt, byId) {
   if (plough) {
+    const previousX = plough.x;
     plough.x -= 245 * dt;
+    const previousBlade = previousX - 38;
+    const blade = plough.x - 38;
+    let gatheredArea = 0;
     for (const pile of [ground, ...piles.values()]) {
       if (pile !== ground && !pile.rect.taskbar) continue;
-      const edge = Math.floor((plough.x - 26 - pile.rect.left) / column);
-      for (let i = edge; i <= edge + 6; i++) {
-        if (i < 0 || i >= pile.profile.length || pile.profile[i] < 0.3) continue;
-        const depth = pile.profile[i];
-        pile.profile[i] = 0;
-        plough.heap[0] = Math.min(11, plough.heap[0] + depth * 0.22);
+      const swept = sweepSnowProfile(pile, previousBlade, blade, column);
+      gatheredArea += swept.area;
+    }
+    // Load is accumulated swept snow AREA, not a fixed triangle of pixels.
+    // Snow visibly grows in front of the blade and slowly subsides in clear areas.
+    if (gatheredArea > 0) {
+      plough.load = Math.min(1800, plough.load + gatheredArea * 0.72);
+      if (Math.random() < 0.65 && accents.length < 780) {
+        const frontX = Math.max(0, Math.min(width - 1, blade));
         accents.push({
-          kind: 'chunk', x: pile.rect.left + i * column, y: pile.rect.top - depth,
-          vx: random(-165, -35), vy: random(-105, -30), size: random(1, 4), life: 0.6,
+          kind: 'chunk', x: blade - random(0, 20), y: bottomSurfaceAt(frontX).top - random(5, 20),
+          vx: random(-115, -30), vy: random(-115, -40), size: random(1, 2.5), life: 0.6,
         });
       }
+    } else plough.load = Math.max(0, plough.load - dt * 28);
+
+    // Sweep snowballs AND entire snowmen by their bottom/root snowball.
+    for (const root of balls) {
+      if (root.stack || root.broken || root === grabbed || plough.carried.includes(root)) continue;
+      const floor = bottomSurfaceAt(root.x).top;
+      if (!bladeTouchesBall(root, previousBlade, blade, floor)) continue;
+      plough.carried.push(root);
+      plough.load = Math.min(1800, plough.load + Math.PI * root.size ** 2 * 0.33);
+      root.support = null;
     }
-    // Keep the pushed snow shallow. Excess mass is dispersed as fine loose snow
-    // instead of forming the giant triangular wall seen in earlier builds.
-    const heap = plough.heap;
-    for (let i = 0; i < heap.length; i++) {
-      const transfer = i === 0 ? 0 : Math.max(0, heap[i - 1] - heap[i] - 1.6) * 0.38;
-      if (i) { heap[i - 1] -= transfer; heap[i] += transfer; }
-      heap[i] = Math.max(0, Math.min(11 - i * 0.4, heap[i] - dt * 2.4));
+    let carriedOffset = 0;
+    for (const root of plough.carried) {
+      const nextX = plough.x - 50 - root.size - carriedOffset;
+      const floor = bottomSurfaceAt(Math.max(0, Math.min(width - 1, nextX))).top;
+      root.x = nextX;
+      root.y = floor - root.size;
+      root.vx = root.vy = 0;
+      root.rotation = (root.rotation ?? 0) - 245 * dt / Math.max(5, root.size);
+      alignStack(root);
+      carriedOffset += root.size * 1.7;
     }
-    if (Math.random() < dt * 16 && heap[0] > 3) {
-      const x = Math.max(0, Math.min(width - 1, plough.x));
-      accents.push({ kind: 'chunk', x: plough.x - random(33, 75),
-        y: bottomSurfaceAt(x).top - random(4, 13), vx: random(-75, -25),
-        vy: random(-80, -32), size: random(0.8, 1.9), life: 0.6 });
+    if (plough.x < -110 - carriedOffset) {
+      const carried = new Set(plough.carried);
+      balls = balls.filter(ball => !carried.has(stackRoot(ball)));
+      plough = undefined;
     }
-    if (plough.x < -80) plough = undefined;
   } else if (settings.weather !== 'rain' && settings.enabled && !settings.paused &&
       settings.taskbar && performance.now() >= nextAutoPloughCheck) {
     nextAutoPloughCheck = performance.now() + 1600;
@@ -655,7 +681,7 @@ function updateSnowProps(dt, byId) {
     }
   }
   for (const ball of balls) {
-    if (ball === grabbed) continue;
+    if (ball === grabbed || plough?.carried.includes(ball)) continue;
     if (ball.stack) {
       if (balls.includes(ball.stack)) continue;
       ball.stack = null;
@@ -854,7 +880,7 @@ function paintSnowProps(now) {
   }
   if (plough) {
     const x = Math.max(0, Math.min(width - 1, plough.x));
-    drawPlough(ctx, plough.x, bottomSurfaceAt(x).top - 4, plough.heap, snowGrain, now);
+    drawPlough(ctx, plough.x, bottomSurfaceAt(x).top - 4, plough.load, snowGrain, now);
   }
 }
 

@@ -94,33 +94,41 @@ export function drawSnowman(ctx, head, middle) {
   oval(ctx, middle.x, middle.y + middle.size * .39, 1.7, 1.7, '#263344');
 }
 
-export function drawPlough(ctx, x, y, heap, texture, now) {
+export function drawPlough(ctx, x, y, load, texture, now) {
   ctx.save();
   ctx.translate(x, y);
-  let peak = 0;
-  for (const depth of heap) peak = Math.max(peak, depth);
-  peak = Math.min(11, peak);
-  if (peak > .3) {
-    const fill = ctx.createLinearGradient(0, -peak, 0, 0);
-    fill.addColorStop(0, '#fcfdff');
-    fill.addColorStop(.43, '#e8f1fb');
-    fill.addColorStop(1, '#91a8c4');
+  const fullness = Math.min(1, Math.max(0, load / 1800));
+  const peak = 23 * Math.sqrt(fullness);
+  if (peak > 0.6) {
+    // Rounded mound that becomes wider AND higher as snow is actually collected.
+    // Its crest stays below the cabin; never a tall straight-sided triangle.
+    const length = 22 + 75 * Math.sqrt(fullness);
+    const fill = ctx.createLinearGradient(0, -peak, 0, 1);
+    fill.addColorStop(0, '#ffffff');
+    fill.addColorStop(0.50, '#ecf3ff');
+    fill.addColorStop(1, '#a7bdd6');
     ctx.beginPath();
-    ctx.moveTo(-30, 0);
-    ctx.lineTo(-30, -Math.min(11, heap[0]));
-    for (let i = 1; i < heap.length; i++) {
-      const left = Math.min(11, heap[i - 1]), right = Math.min(11, heap[i]);
-      ctx.quadraticCurveTo(-30 - (i - .5) * 3, -left,
-        -30 - i * 3, -(left + right) / 2);
-    }
-    ctx.lineTo(-30 - heap.length * 3, 0);
+    ctx.moveTo(-36, 0);
+    ctx.quadraticCurveTo(-40, -peak * 0.85, -53, -peak);
+    ctx.bezierCurveTo(-57 - length * 0.16, -peak * 1.04,
+      -50 - length * 0.62, -peak * 0.63,
+      -36 - length, -2);
+    ctx.quadraticCurveTo(-30 - length, 0, -36, 0);
     ctx.closePath();
     ctx.fillStyle = fill;
     ctx.fill();
     if (texture) {
+      ctx.globalAlpha = 0.38;
       ctx.fillStyle = texture;
       ctx.fill();
+      ctx.globalAlpha = 1;
     }
+    ctx.strokeStyle = '#ffffffc4';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(-39, -peak * 0.3);
+    ctx.quadraticCurveTo(-53, -peak, -53 - length * 0.35, -peak * 0.9);
+    ctx.stroke();
   }
   ctx.shadowColor = '#091321aa';
   ctx.shadowBlur = 3;

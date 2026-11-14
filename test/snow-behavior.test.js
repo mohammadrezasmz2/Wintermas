@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { shedOnWindowMotion, naturalSnowHeights, keepBallAboveTaskbar, canStackBall, needsAutoPlough } from '../ui/snow-behavior.js';
+import { shedOnWindowMotion, naturalSnowHeights, keepBallAboveTaskbar, canStackBall, needsAutoPlough, sweepSnowProfile, bladeTouchesBall } from '../ui/snow-behavior.js';
 
 test('snow follows a slowly moved window without shedding', () => {
   const bank = new Float32Array(50).fill(9);
@@ -39,4 +39,33 @@ test('automatic snowplough waits for a filled lower ledge', () => {
   assert.ok(needsAutoPlough([bed], null));
   bed.profile.fill(2);
   assert.equal(needsAutoPlough([bed], null), false);
+});
+
+test('upward window yank ejects snow along the full width and reduces bank depth', () => {
+  const bank = new Float32Array(330).fill(11);
+  const events = shedOnWindowMotion(bank, { dx: 0, dy: -28, lastVy: 0 }, 0.02);
+  assert.ok(events.dislodged.length >= 25);
+  assert.ok(events.dislodged.some(event => event.index > 270));
+  assert.ok(events.dislodged.some(event => event.index < 50));
+  assert.ok([...bank].every(value => value < 11));
+  assert.ok([...bank].reduce((a,b) => a + b, 0) < 330 * 9);
+});
+test('snow moves with slow upward drag without crumbling', () => {
+  const bank = new Float32Array(330).fill(8);
+  const events = shedOnWindowMotion(bank, { dx: 0, dy: -1.5, lastVy: -35 }, 0.03);
+  assert.equal(events.dislodged.length, 0);
+});
+test('blade collects only the snow it actually crosses', () => {
+  const bed = { rect: { left: 0 }, profile: new Float32Array([6, 6, 6, 6, 6, 6, 6, 6]) };
+  const collected = sweepSnowProfile(bed, 25, 18, 6);
+  assert.ok(collected.area > 0);
+  assert.ok(collected.cells > 0 && collected.cells < 8);
+  const second = sweepSnowProfile(bed, 25, 18, 6);
+  assert.equal(second.area, 0);
+});
+test('blade can pick up a snowball and snowman root at taskbar height', () => {
+  const root = { x: 75, y: 280, size: 20 };
+  assert.ok(bladeTouchesBall(root, 90, 65, 300));
+  assert.equal(bladeTouchesBall({ x: 75, y: 100, size: 20 }, 90, 65, 300), false);
+  assert.equal(bladeTouchesBall(root, 220, 200, 300), false);
 });
