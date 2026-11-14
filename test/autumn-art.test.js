@@ -23,5 +23,6 @@ test('leaf pile renderer uses local physical density and reduced leaf squash', a
   const renderer=await readFile(new URL('../ui/autumn.js', import.meta.url),'utf8');
   assert.match(renderer,/leafPileProfile\(pile\.items,span\)/);
   assert.match(renderer,/settledLeafOffset\(pile\.items,/);
-  assert.match(renderer,/\.025\),\.59\)/);
+  assert.match(renderer,/settledLeafVisualSize\(item\.size,item\.layer\)/);
+  assert.match(renderer,/\.02\),\.78\)/);
 });

@@ -76,10 +76,16 @@ export function leafPileProfile(items, width, step=9) {
     const density=(bins[i]??0)*.42+
       (bins[i-1]??0)*.23+(bins[i+1]??0)*.23+
       (bins[i-2]??0)*.06+(bins[i+2]??0)*.06;
-    const height=Math.max(0,density*3.5-1.2);
+    const height=Math.max(0,density*5.2-.7);
     const waviness=.86+.14*Math.cos(i*1.67);
     const edge=Math.min(1,(i+.15)*.65,(bins.length-i-.15)*.65);
-    heights[i]=Math.min(22,height*waviness*Math.max(0,edge));
+    heights[i]=Math.min(30,height*waviness*Math.max(0,edge));
   }
   return {step,heights};
+}
+
+// A leaf already shrinks on collision (for perspective); do NOT shrink a
+// second time by 50–60% in the pile renderer, which made the bank look gritty.
+export function settledLeafVisualSize(storedSize, layer = 0) {
+  return storedSize * (.82 + .065 * Math.min(5, Math.max(0, layer)));
 }

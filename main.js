@@ -231,8 +231,20 @@ function broadcastGeometry(windows, pressed, control, minimized = [], moving = n
       }
     }
     const workBottom = display.workArea.y + display.workArea.height - y;
-    if (workBottom < height && !rectangles.some(rect => rect.taskbar && rect.bottom >= height - 1)) {
-      rectangles.unshift({ id: 'taskbar-fallback', left: 0, top: workBottom, right: width, bottom: height, taskbar: true });
+    // Display.workArea is the authoritative top of a bottom-docked Windows
+    // taskbar. The native Shell_TrayWnd frame can include inset/shadow pixels
+    // and should not override this actual usable desktop boundary.
+    if (workBottom > 0 && workBottom < height - 1 && Math.abs(display.workArea.y - y) < 1) {
+      // Drop duplicate Shell_TrayWnd geometry at this bottom edge: native DWM
+      // bounds can differ from the actual work-area top by several pixels.
+      // Every weather system must deposit on the SAME canonical ledge.
+      for (let i = rectangles.length - 1; i >= 0; i--) {
+        const rect = rectangles[i];
+        if (rect.taskbar && rect.bottom >= height - 4 && rect.top > height * .25 &&
+            rect.right > 0 && rect.left < width) rectangles.splice(i, 1);
+      }
+      rectangles.unshift({ id: 'taskbar-fallback', left: 0, top: workBottom,
+        right: width, bottom: height, taskbar: true });
     }
     send(win, 'desktop', { rectangles, minimized, moving, mouse: { x: mouse.x - x, y: mouse.y - y, pressed, control } });
   }

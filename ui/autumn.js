@@ -4,7 +4,7 @@ import { landing, bottomTaskbarAt } from './geometry.js';
 import { clipPrecipitation } from './precipitation-mask.js';
 import { createLeafSprites, drawLeaf, drawAutumnMound } from './autumn-art.js';
 import { advanceLeaf, pointerImpulse, sweepLeafItems, pileLayer,
-  settledLeafOffset, leafPileProfile } from './autumn-physics.js';
+  settledLeafOffset, leafPileProfile, settledLeafVisualSize } from './autumn-physics.js';
 
 const random=(min,max)=>min+Math.random()*(max-min);
 const MAX_LEAVES=320, MAX_PILE=460;
@@ -46,7 +46,7 @@ export function createAutumn() {
     if(pile.items.length>=MAX_PILE) pile.items.shift();
     const offset=settledLeafOffset(pile.items,x-rect.left,rect.right-rect.left,Math.random());
     pile.items.push({
-      offset,size:leaf.size*random(.62,.92),variant:leaf.variant,
+      offset,size:leaf.size*random(.94,1.16),variant:leaf.variant,
       angle:random(-2.4,2.4),
       layer:pileLayer(pile.items,offset),
       flip:random(-.55,.55),
@@ -224,11 +224,11 @@ export function createAutumn() {
       const x=rect.left+item.offset;
       if(x<-32||x>width+32)continue;
       const bin=Math.max(0,Math.min(heights.length-1,Math.floor(item.offset/step)));
-      const rise=Math.min(heights[bin]+3,2+(item.layer??0)*2.05);
+      const rise=Math.min(heights[bin]+5,3+(item.layer??0)*3.0);
       const y=rect.top-1-rise;
-      const size=item.size*(.43+.045*Math.min(5,item.layer??0));
+      const size=settledLeafVisualSize(item.size,item.layer);
       drawLeaf(ctx,atlas[item.variant],x,y,size,item.angle,item.flip,
-        .79+Math.min(.18,(item.layer??0)*.025),.59);
+        .86+Math.min(.12,(item.layer??0)*.02),.78);
     }
     ctx.restore();
   }

@@ -15,6 +15,7 @@ import { santaStops, bladeCrosses, isOnBottomSurface } from './santa-visit.js';
 import { shouldSpillMinimizedPile } from './window-snow.js';
 import { shakeSnowOffWindow } from './window-powder.js';
 import { titlebarWindowAt, draggedEnough, hideMovingWindowSnow } from './window-drag.js';
+import { ploughBaselineForFloor, santaCenterForFloor, safeBottomFloor } from './taskbar-actors.js';
 import { snowDiameter, powderShares, setVisibleSnowDiameter } from './snow-diameter.js';
 import { dropTreeAt, fallTree } from './tree-physics.js';
 
@@ -414,8 +415,8 @@ function updateParticles(dt) {
       // Santa and sleigh travel on the LOWER edge, not in the middle of the desktop.
       p.age += dt;
       p.x = -175 + p.age * 190;
-      const floor = bottomSurfaceAt(Math.max(0, Math.min(width - 1, p.x))).top;
-      p.y = floor - 38;
+      const x = Math.max(0, Math.min(width - 1, p.x));
+      p.y = santaCenterForFloor(safeBottomFloor(taskbars, x, height));
       p.tilt = 0;
       while (p.stopIndex < p.stops.length && p.x >= p.stops[p.stopIndex].x) {
         const stop = p.stops[p.stopIndex++];
@@ -756,7 +757,7 @@ function alignStack(root) {
 
 function launchSantaVisit(snowmanXs) {
   if (accents.some(p => p.kind === 'santa')) return false;
-  accents.push({ kind: 'santa', x: -175, y: bottomSurfaceAt(0).top - 38,
+  accents.push({ kind: 'santa', x: -175, y: santaCenterForFloor(safeBottomFloor(taskbars, 0, height)),
     age: 0, stops: santaStops(snowmanXs, width), stopIndex: 0, alpha: 1 });
   sceneDirty = true;
   return true;
@@ -1132,12 +1133,14 @@ function paintSnowProps(now) {
     const x = Math.max(0, Math.min(width - 1, plough.x));
     // Draw the mound baseline at the taskbar edge. The old -4 offset left
     // a dark strip between the accumulated snow and the ground.
-    const surfaceY = bottomSurfaceAt(x).top + 1;
+    const floorY = safeBottomFloor(taskbars, x, height);
+    const vehicleY = ploughBaselineForFloor(floorY);
     if (settings.weather === 'autumn') {
-      // Continuous leaf mound touches the leading blade, which masks the seam.
-      autumn.drawMound(ctx, plough.x, surfaceY, plough.load, now);
-      drawPlough(ctx, plough.x, surfaceY, 0, snowGrain, now);
-    } else drawPlough(ctx, plough.x, surfaceY, plough.load, snowGrain, now);
+      // Leaf heap must contact the actual floor; the vehicle art extends
+      // below its own origin, so use a separate safe vehicle baseline.
+      autumn.drawMound(ctx, plough.x, floorY - 1, plough.load, now);
+      drawPlough(ctx, plough.x, vehicleY, 0, snowGrain, now);
+    } else drawPlough(ctx, plough.x, vehicleY, plough.load, snowGrain, now);
   }
 }
 
