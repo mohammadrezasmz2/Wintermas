@@ -50,16 +50,25 @@ function trayMenu() {
 
 // The panel is a flyout above the tray icon: nothing stays pinned on the desktop.
 let panelHiddenAt = 0, panelPinned = false, showWhenSized = false;
+let lastTrayClick;
 
 function placeFlyout() {
   const { width, height } = panel.getBounds();
   const icon = tray.getBounds();
-  const anchor = icon.width > 0 ? { x: icon.x + icon.width / 2, y: icon.y + icon.height / 2 } : screen.getCursorScreenPoint();
+  // An icon inside the Windows overflow flyout may not have stable bounds.
+  // In that case anchor to the actual click, never to an unrelated cursor.
+  const fallbackDisplay = screen.getPrimaryDisplay();
+  const fallback = { x: fallbackDisplay.workArea.x + fallbackDisplay.workArea.width - 26,
+    y: fallbackDisplay.workArea.y + fallbackDisplay.workArea.height + 8 };
+  const anchor = icon.width > 0 && icon.height > 0
+    ? { x: icon.x + icon.width / 2, y: icon.y + icon.height / 2 }
+    : (lastTrayClick ?? fallback);
   const display = screen.getDisplayNearestPoint({ x: Math.round(anchor.x), y: Math.round(anchor.y) });
   const area = display.workArea, full = display.bounds, gap = 8;
   const clampX = x => Math.round(Math.max(area.x + gap, Math.min(x, area.x + area.width - width - gap)));
   const clampY = y => Math.round(Math.max(area.y + gap, Math.min(y, area.y + area.height - height - gap)));
-  let x = clampX(anchor.x - width / 2), y = area.y + area.height - height - gap;
+  let x = clampX(anchor.x - width / 2);
+  let y = clampY(anchor.y - height - gap);
   if (area.y > full.y) y = area.y + gap;
   else if (area.x > full.x) { x = area.x + gap; y = clampY(anchor.y - height / 2); }
   else if (area.width < full.width) { x = area.x + area.width - width - gap; y = clampY(anchor.y - height / 2); }
@@ -374,8 +383,9 @@ async function start() {
   panel.on('blur', () => { if (!panelPinned && !process.argv.includes('--smoke-test')) hidePanel(); });
   tray = new Tray(icon.resize({ width: 32, height: 32, quality: 'best' }));
   tray.setToolTip('Wintermas');
-  tray.on('click', togglePanel);
-  tray.on('double-click', showPanel);
+  const rememberTrayClick = () => { lastTrayClick = screen.getCursorScreenPoint(); };
+  tray.on('click', () => { rememberTrayClick(); togglePanel(); });
+  tray.on('double-click', () => { rememberTrayClick(); showPanel(); });
   tray.on('balloon-click', showPanel);
   trayMenu();
   ipcMain.handle('settings:get', () => ({ ...settings, tracking }));
@@ -415,7 +425,10 @@ async function start() {
       for (const win of overlays.values()) send(win, 'effect:action', action);
     }
   });
-  for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(event, refreshOverlays);
+  for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(event, () => {
+    refreshOverlays();
+    if (panel?.isVisible()) placeFlyout();
+  });
   powerMonitor.on('lock-screen', () => { locked = true; syncRuntime(); });
   for (const event of ['suspend', 'resume', 'on-battery', 'on-ac']) {
     powerMonitor.on(event, () => diagnostics.write('info', 'power', event));

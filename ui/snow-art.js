@@ -99,6 +99,7 @@ export function drawPlough(ctx, x, y, heap, texture, now) {
   ctx.translate(x, y);
   let peak = 0;
   for (const depth of heap) peak = Math.max(peak, depth);
+  peak = Math.min(11, peak);
   if (peak > .3) {
     const fill = ctx.createLinearGradient(0, -peak, 0, 0);
     fill.addColorStop(0, '#fcfdff');
@@ -106,9 +107,11 @@ export function drawPlough(ctx, x, y, heap, texture, now) {
     fill.addColorStop(1, '#91a8c4');
     ctx.beginPath();
     ctx.moveTo(-30, 0);
-    ctx.lineTo(-30, -heap[0]);
+    ctx.lineTo(-30, -Math.min(11, heap[0]));
     for (let i = 1; i < heap.length; i++) {
-      ctx.quadraticCurveTo(-30 - (i - .5) * 3, -heap[i - 1], -30 - i * 3, -(heap[i - 1] + heap[i]) / 2);
+      const left = Math.min(11, heap[i - 1]), right = Math.min(11, heap[i]);
+      ctx.quadraticCurveTo(-30 - (i - .5) * 3, -left,
+        -30 - i * 3, -(left + right) / 2);
     }
     ctx.lineTo(-30 - heap.length * 3, 0);
     ctx.closePath();
