@@ -11,6 +11,7 @@ import { createPerfMonitor } from './perf-monitor.js';
 import { clipPrecipitation } from './precipitation-mask.js';
 import { shedOnWindowMotion, naturalSnowHeights, keepBallAboveTaskbar, canStackBall, needsAutoPlough, sweepSnowProfile, bladeTouchesBall } from './snow-behavior.js';
 import { santaStops, bladeCrosses, isOnBottomSurface } from './santa-visit.js';
+import { shouldSpillMinimizedPile } from './window-snow.js';
 
 const canvas = document.querySelector('canvas');
 const ctx = canvas.getContext('2d');
@@ -42,6 +43,9 @@ let heldTree, frameRequest;
 const garlands = [], trees = [];
 let gifts = [];
 const piles = new Map();
+const celebratedSnowmen = new WeakSet();
+const santaPendingSnowmen = new Set();
+let nextSantaVisitAt = 0;
 
 // ---- v0.2: smooth pacing, dirty redraws, rain weather, diagnostics ----
 const rain = createRain(document.querySelector('#rain'));
@@ -81,6 +85,8 @@ function applyWeather(before, next) {
   accents = [];
   balls = [];
   gifts = [];
+  santaPendingSnowmen.clear();
+  nextSantaVisitAt = 0;
   grabbed = undefined;
   plough = undefined;
   fraction = 0;
@@ -134,12 +140,17 @@ function releaseSnow(x, y, depth, vx, vy, avoidId = null) {
 }
 
 function spill(pile) {
-  for (let index = 0; index < pile.profile.length; index++) {
-    const depth = pile.profile[index];
-    if (depth < 0.05) continue;
-    const x = pile.rect.left + (index + 0.5) * column;
-    const y = pile.rect.top - depth / 2;
-    releaseSnow(x, y, depth, random(-16, 16), 0);
+  // Each three adjacent columns become one falling flurry on minimize.
+  for (let index = 0; index < pile.profile.length; index += 3) {
+    let depth = 0, count = 0;
+    for (let i = index; i < Math.min(index + 3, pile.profile.length); i++) {
+      depth += pile.profile[i];
+      count++;
+    }
+    if (depth < 0.12) continue;
+    const x = pile.rect.left + (index + count / 2) * column + random(-5, 5);
+    const y = pile.rect.top - depth / count - random(2, 9);
+    releaseSnow(x, y, depth * 0.9, random(-85, 85), random(-90, -12));
   }
 }
 function desktop(frame) {
@@ -158,7 +169,8 @@ function desktop(frame) {
     if (pile.rect.taskbar && (!settings.taskbar || settings.paused)) {
       piles.delete(id);
     } else if (!next) {
-      // An invisible or closed app must never leave a floating snow outline.
+      // Closed windows lose snow; minimized windows drop it into the desktop.
+      if (shouldSpillMinimizedPile(id, frame.minimized)) spill(pile);
       piles.delete(id);
     } else {
       pile.lastSeen = now;
@@ -346,6 +358,7 @@ function updateParticles(dt) {
   accents.push(...trail);
   updateSnowProps(dt, byId);
   updateGifts(dt, byId);
+  dispatchQueuedSantaVisit();
 }
 
 function updateGifts(dt, byId) {
@@ -454,7 +467,7 @@ function updatePointer(next, elapsed) {
       return fromBase >= 0 && fromBase <= 115 &&
         Math.abs(point.x - next.x) < Math.max(10, 42 * (1 - fromBase / 122));
     });
-    if (tree) {
+    if (tree && !plough?.carriedTrees.includes(tree)) {
       capturePointer(true);
       if (clicked) {
         const point = resolveAnchor(tree.anchor);
@@ -610,6 +623,25 @@ function alignStack(root) {
   }
 }
 
+function launchSantaVisit(snowmanXs) {
+  if (accents.some(p => p.kind === 'santa')) return false;
+  accents.push({ kind: 'santa', x: -175, y: bottomSurfaceAt(0).top - 38,
+    age: 0, stops: santaStops(snowmanXs, width), stopIndex: 0, alpha: 1 });
+  sceneDirty = true;
+  return true;
+}
+
+function dispatchQueuedSantaVisit() {
+  if (!nextSantaVisitAt || performance.now() < nextSantaVisitAt ||
+      settings.weather === 'rain' || settings.paused || !settings.enabled ||
+      accents.some(p => p.kind === 'santa')) return;
+  const people = [...santaPendingSnowmen].filter(root =>
+    balls.includes(root) && !root.broken && stackMembers(root).length >= 3);
+  santaPendingSnowmen.clear();
+  nextSantaVisitAt = 0;
+  if (people.length) launchSantaVisit(people.map(root => root.x));
+}
+
 function startPlough() {
   if (plough || settings.weather === 'rain') return;
   plough = { x: width + 70, load: 0, carried: [], carriedGifts: [], carriedTrees: [] };
@@ -625,6 +657,12 @@ function settleOnSnowball(ball, base) {
   ball.y = base.y - base.size - ball.size + 2;
   ball.vx = ball.vy = 0;
   ball.thrown = false;
+  const root = stackRoot(ball);
+  if (stackMembers(root).length >= 3 && !celebratedSnowmen.has(root)) {
+    celebratedSnowmen.add(root);
+    santaPendingSnowmen.add(root);
+    if (!nextSantaVisitAt) nextSantaVisitAt = performance.now() + 1100;
+  }
 }
 
 function findSnowballBase(ball) {
@@ -679,9 +717,14 @@ function updateSnowProps(dt, byId) {
     for (const tree of trees) {
       if (plough.carriedTrees.includes(tree) || tree === heldTree?.tree) continue;
       const anchor = resolveAnchor(tree.anchor);
-      if (!anchor || !isOnBottomSurface(anchor.y, anchor.x, x => bottomSurfaceAt(x).top, 17)) continue;
-      if (bladeCrosses(previousBlade, blade, anchor.x, 30)) {
+      if (!anchor) continue;
+      // Santa trees are taskbar-bound even if the work area moves a few pixels.
+      const nearFloor = tree.fromSanta ||
+        isOnBottomSurface(anchor.y, anchor.x, x => bottomSurfaceAt(x).top, 42);
+      if (!nearFloor) continue;
+      if (bladeCrosses(previousBlade, blade, anchor.x, 55)) {
         tree.anchor = { x: anchor.x, y: anchor.y };
+        tree.leanTarget = -0.2;
         plough.carriedTrees.push(tree);
       }
     }
@@ -802,6 +845,11 @@ function updateSnowProps(dt, byId) {
   for (const ball of balls) if (!ball.stack) {
     keepBallAboveTaskbar(ball, taskbars, height);
     alignStack(ball);
+    if (stackMembers(ball).length >= 3 && !celebratedSnowmen.has(ball)) {
+      celebratedSnowmen.add(ball);
+      santaPendingSnowmen.add(ball);
+      if (!nextSantaVisitAt) nextSantaVisitAt = performance.now() + 1100;
+    }
   }
 }
 
@@ -1086,6 +1134,8 @@ wintermas.onAction(action => {
     accents = [];
     balls = [];
     gifts = [];
+    santaPendingSnowmen.clear();
+    nextSantaVisitAt = 0;
     grabbed = undefined;
     plough = undefined;
     fraction = 0;
@@ -1093,13 +1143,9 @@ wintermas.onAction(action => {
   } else if (action === 'clear') {
     startPlough();
   } else if (action === 'santa') {
-    if (accents.some(p => p.kind === 'santa')) return;
-    const onBottom = balls.filter(root => !root.stack && !root.broken &&
-      stackMembers(root).length >= 3 &&
-      isOnBottomSurface(root.y + root.size, root.x, x => bottomSurfaceAt(x).top, 22));
-    accents.push({ kind: 'santa', x: -175, y: bottomSurfaceAt(0).top - 38,
-      age: 0, stops: santaStops(onBottom.map(root => root.x), width),
-      stopIndex: 0, alpha: 1 });
+    const snowmen = balls.filter(root => !root.stack && !root.broken &&
+      stackMembers(root).length >= 3);
+    launchSantaVisit(snowmen.map(root => root.x));
   } else if (action === 'gather') {
     const pile = [...piles.values(), ground].find(candidate =>
       mouse.x >= candidate.rect.left && mouse.x < candidate.rect.right &&

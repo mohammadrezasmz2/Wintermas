@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { shedOnWindowMotion, naturalSnowHeights, keepBallAboveTaskbar, canStackBall, needsAutoPlough, sweepSnowProfile, bladeTouchesBall } from '../ui/snow-behavior.js';
+import { shedOnWindowMotion, naturalSnowHeights, keepBallAboveTaskbar, canStackBall, needsAutoPlough, sweepSnowProfile, bladeTouchesBall, animatedMound } from '../ui/snow-behavior.js';
 
 test('snow follows a slowly moved window without shedding', () => {
   const bank = new Float32Array(50).fill(9);
@@ -80,4 +80,13 @@ test('blade can pick up a snowball and snowman root at taskbar height', () => {
   assert.ok(bladeTouchesBall(root, 90, 65, 300));
   assert.equal(bladeTouchesBall({ x: 75, y: 100, size: 20 }, 90, 65, 300), false);
   assert.equal(bladeTouchesBall(root, 220, 200, 300), false);
+});
+
+test('snowplough mound has bounded height and animates as time changes', () => {
+  const a = animatedMound(850, 200), b = animatedMound(850, 350);
+  assert.ok(a.peak > 0 && a.peak <= 23);
+  assert.equal(a.length, b.length);
+  assert.notEqual(a.ripple, b.ripple);
+  assert.equal(animatedMound(0, 0).peak, 0);
+  assert.ok(animatedMound(3000, 0).peak <= 23);
 });

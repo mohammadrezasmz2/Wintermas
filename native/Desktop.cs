@@ -65,10 +65,17 @@ static class Desktop {
         bool fineTimer = false;
         while (true) {
             var windows = new List<string>();
+            var minimized = new List<string>();
             EnumWindows(delegate(IntPtr hwnd, IntPtr ignored) {
                 uint owner;
                 GetWindowThreadProcessId(hwnd, out owner);
-                if (owner == parent || !IsWindowVisible(hwnd) || IsIconic(hwnd)) return true;
+                if (owner == parent) return true;
+                // Minimized HWNDs need separate notification to release snow.
+                if (IsIconic(hwnd)) {
+                    minimized.Add(string.Format(CultureInfo.InvariantCulture, "\"{0:X}\"", hwnd.ToInt64()));
+                    return true;
+                }
+                if (!IsWindowVisible(hwnd)) return true;
                 int cloaked;
                 if (DwmGetWindowAttribute(hwnd, 14, out cloaked, 4) == 0 && cloaked != 0) return true;
                 var buffer = new StringBuilder(128);
@@ -88,7 +95,9 @@ static class Desktop {
             bool pressed = GetAsyncKeyState(1) < 0;
             bool control = GetAsyncKeyState(0x11) < 0;
             string snapshot = "{\"pressed\":" + (pressed ? "true" : "false") +
-                ",\"control\":" + (control ? "true" : "false") + ",\"windows\":[" + string.Join(",", windows) + "]}";
+                ",\"control\":" + (control ? "true" : "false") +
+                ",\"minimized\":[" + string.Join(",", minimized) + "]" +
+                ",\"windows\":[" + string.Join(",", windows) + "]}";
             Point cursor;
             GetCursorPos(out cursor);
             int now = Environment.TickCount;

@@ -207,7 +207,7 @@ async function update(patch) {
   return snapshot;
 }
 
-function broadcastGeometry(windows, pressed, control) {
+function broadcastGeometry(windows, pressed, control, minimized = []) {
   if (locked || !settings.enabled) return;
   const mouse = screen.getCursorScreenPoint();
   displayCache ??= new Map(screen.getAllDisplays().map(display => [display.id, display]));
@@ -232,7 +232,7 @@ function broadcastGeometry(windows, pressed, control) {
     if (workBottom < height && !rectangles.some(rect => rect.taskbar && rect.bottom >= height - 1)) {
       rectangles.unshift({ id: 'taskbar-fallback', left: 0, top: workBottom, right: width, bottom: height, taskbar: true });
     }
-    send(win, 'desktop', { rectangles, mouse: { x: mouse.x - x, y: mouse.y - y, pressed, control } });
+    send(win, 'desktop', { rectangles, minimized, mouse: { x: mouse.x - x, y: mouse.y - y, pressed, control } });
   }
 }
 
@@ -244,12 +244,12 @@ function startTracking() {
   const lines = createInterface({ input: worker.stdout });
   lines.on('line', line => {
     try {
-      const { windows, pressed, control } = JSON.parse(line);
+      const { windows, pressed, control, minimized = [] } = JSON.parse(line);
       if (!tracking) {
         tracking = true;
         send(panel, 'desktop', { tracking });
       }
-      broadcastGeometry(windows, pressed, control);
+      broadcastGeometry(windows, pressed, control, minimized);
     } catch (error) { console.error(error.message); }
   });
   worker.once('close', code => {

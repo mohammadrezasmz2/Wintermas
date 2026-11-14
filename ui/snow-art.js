@@ -1,3 +1,5 @@
+import { animatedMound } from './snow-behavior.js';
+
 function oval(ctx, x, y, rx, ry, color) {
   ctx.beginPath();
   ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
@@ -97,21 +99,20 @@ export function drawSnowman(ctx, head, middle) {
 export function drawPlough(ctx, x, y, load, texture, now) {
   ctx.save();
   ctx.translate(x, y);
+  const { peak, length, ripple } = animatedMound(load, now);
   const fullness = Math.min(1, Math.max(0, load / 1800));
-  const peak = 23 * Math.sqrt(fullness);
   if (peak > 0.6) {
     // Rounded mound that becomes wider AND higher as snow is actually collected.
     // Its crest stays below the cabin; never a tall straight-sided triangle.
-    const length = 22 + 75 * Math.sqrt(fullness);
     const fill = ctx.createLinearGradient(0, -peak, 0, 1);
     fill.addColorStop(0, '#ffffff');
     fill.addColorStop(0.50, '#ecf3ff');
     fill.addColorStop(1, '#a7bdd6');
     ctx.beginPath();
     ctx.moveTo(-36, 0);
-    ctx.quadraticCurveTo(-40, -peak * 0.85, -53, -peak);
-    ctx.bezierCurveTo(-57 - length * 0.16, -peak * 1.04,
-      -50 - length * 0.62, -peak * 0.63,
+    ctx.quadraticCurveTo(-40, -peak * 0.85 - ripple * 0.35, -53, -peak - ripple);
+    ctx.bezierCurveTo(-57 - length * 0.16, -peak * 1.04 + ripple * 0.55,
+      -50 - length * 0.62, -peak * 0.63 - ripple * 0.6,
       -36 - length, 2);
     ctx.quadraticCurveTo(-30 - length, 3, -36, 3);
     ctx.closePath();
@@ -123,12 +124,36 @@ export function drawPlough(ctx, x, y, load, texture, now) {
       ctx.fill();
       ctx.globalAlpha = 1;
     }
+    ctx.save();
+    ctx.clip();
+    for (let i = 0; i < 26; i++) {
+      const t = ((now * 0.00038 + i * 0.071) % 1 + 1) % 1;
+      const px = -43 - t * (length - 5);
+      const py = -2 - peak * (0.36 + 0.54 * Math.sin(Math.PI * t)) +
+        Math.sin(now * 0.008 + i * 1.7) * 0.7;
+      ctx.globalAlpha = 0.32 + 0.45 * (1 - t);
+      ctx.fillStyle = i % 3 ? '#ffffff' : '#aac6df';
+      ctx.beginPath();
+      ctx.arc(px, py, i % 4 === 0 ? 1.3 : 0.75, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
     ctx.strokeStyle = '#ffffffc4';
     ctx.lineWidth = 0.8;
     ctx.beginPath();
     ctx.moveTo(-39, -peak * 0.3);
-    ctx.quadraticCurveTo(-53, -peak, -53 - length * 0.35, -peak * 0.9);
+    ctx.quadraticCurveTo(-53, -peak - ripple, -53 - length * 0.35, -peak * 0.9);
     ctx.stroke();
+    for (let i = 0; i < 7; i++) {
+      const t = (now * 0.0011 + i / 7) % 1;
+      ctx.globalAlpha = (1 - t) * Math.min(0.8, fullness);
+      ctx.fillStyle = '#f5faff';
+      ctx.beginPath();
+      ctx.arc(-37 - t * 19, -peak - Math.sin(Math.PI * t) * 6,
+        0.55 + (1 - t) * 0.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
   }
   ctx.shadowColor = '#091321aa';
   ctx.shadowBlur = 3;

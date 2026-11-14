@@ -142,3 +142,13 @@ export function bladeTouchesBall(ball, previousBlade, blade, floor) {
 export function moundHeight(load) {
   return Math.min(23, 23 * Math.sqrt(Math.max(0, load) / 1800));
 }
+
+export function animatedMound(load, now) {
+  const fullness = Math.max(0, Math.min(1, load / 1800));
+  const peak = moundHeight(load);
+  return {
+    peak,
+    length: 22 + 75 * Math.sqrt(fullness),
+    ripple: Math.sin(now * 0.012) * Math.min(1.5, peak * 0.11),
+  };
+}
