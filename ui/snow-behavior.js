@@ -60,7 +60,13 @@ export function naturalSnowHeights(profile, seed = 0) {
     const e = profile[Math.min(profile.length - 1, i + 2)];
     const smooth = a * 0.09 + b * 0.22 + c * 0.38 + d * 0.22 + e * 0.09;
     const ripple = Math.sin(i * 0.41 + seed) * 0.38 + Math.sin(i * 0.97 + seed * 0.7) * 0.22;
-    values[i] = Math.max(0, Math.min(SNOWBANK_CAP * 1.8, smooth + (smooth > 0.7 ? ripple : 0)));
+    // Ease the ridge to zero at BOTH window ends. A hard edge draws an
+    // unnatural vertical snow wall when a window only partly covers the screen.
+    const span = Math.min(7, Math.max(2, Math.floor(profile.length / 4)));
+    const proximity = Math.min(1, (i + 0.2) / span, (profile.length - i - 0.2) / span);
+    const taper = proximity * proximity * (3 - 2 * proximity);
+    values[i] = Math.max(0, Math.min(SNOWBANK_CAP * 1.8,
+      (smooth + (smooth > 0.7 ? ripple : 0)) * taper));
   }
   return values;
 }

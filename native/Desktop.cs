@@ -14,6 +14,8 @@ static class Desktop {
     const int WsExTransparent = 0x00000020;
     const int WsExToolWindow = 0x00000080;
     const int WsExNoActivate = 0x08000000;
+    const int WsExLayered = 0x00080000;
+    const int WsChild = 0x40000000;
     [StructLayout(LayoutKind.Sequential)]
     struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)]
@@ -28,19 +30,26 @@ static class Desktop {
     [DllImport("user32")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd, StringBuilder name, int length);
     [DllImport("user32")] static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
+    [DllImport("user32")] static extern IntPtr GetWindow(IntPtr hwnd, uint command);
     [DllImport("user32")] static extern bool SetProcessDpiAwarenessContext(IntPtr context);
     [DllImport("dwmapi")] static extern int DwmGetWindowAttribute(IntPtr hwnd, int key, out Rect rect, int size);
     [DllImport("dwmapi")] static extern int DwmGetWindowAttribute(IntPtr hwnd, int key, out int value, int size);
     [DllImport("winmm")] static extern uint timeBeginPeriod(uint period);
     [DllImport("winmm")] static extern uint timeEndPeriod(uint period);
 
-    static bool IsApplicationSurface(IntPtr hwnd) {
+    static bool IsApplicationSurface(IntPtr hwnd, Rect bounds) {
         int extended = GetWindowLong(hwnd, GwlExStyle);
-        // Drag previews and shell overlays are not solid surfaces, even when DWM reports a large rectangle.
-        if ((extended & (WsExTransparent | WsExToolWindow | WsExNoActivate)) != 0) return false;
         int style = GetWindowLong(hwnd, GwlStyle);
-        return (style & WsCaption) == WsCaption || (style & WsThickFrame) != 0 ||
-            (extended & WsExAppWindow) != 0;
+        // Ignore tooltips, drag-preview windows and non-activating transparent surfaces.
+        if ((extended & (WsExTransparent | WsExToolWindow | WsExNoActivate)) != 0 ||
+            (style & WsChild) != 0) return false;
+        if ((style & WsCaption) == WsCaption || (style & WsThickFrame) != 0 ||
+            (extended & WsExAppWindow) != 0) return true;
+        // Borderless CAD applications (including SolidWorks host frames) need to
+        // occlude weather too. Only include substantial *unowned* opaque windows.
+        int w = bounds.Right - bounds.Left, h = bounds.Bottom - bounds.Top;
+        return GetWindow(hwnd, 4) == IntPtr.Zero && w >= 180 && h >= 110 &&
+            (extended & WsExLayered) == 0;
     }
 
     static int Main(string[] args) {
@@ -67,10 +76,10 @@ static class Desktop {
                 string name = buffer.ToString();
                 bool taskbar = name == "Shell_TrayWnd" || name == "Shell_SecondaryTrayWnd";
                 if (name == "Progman" || name == "WorkerW" || name == "DV2ControlHost") return true;
-                if (!taskbar && !IsApplicationSurface(hwnd)) return true;
                 Rect bounds;
                 if (DwmGetWindowAttribute(hwnd, 9, out bounds, 16) != 0 && !GetWindowRect(hwnd, out bounds)) return true;
                 if (bounds.Right - bounds.Left < 32 || bounds.Bottom - bounds.Top < 16) return true;
+                if (!taskbar && !IsApplicationSurface(hwnd, bounds)) return true;
                 windows.Add(string.Format(CultureInfo.InvariantCulture,
                     "{{\"id\":\"{0:X}\",\"left\":{1},\"top\":{2},\"right\":{3},\"bottom\":{4},\"taskbar\":{5}}}",
                     hwnd.ToInt64(), bounds.Left, bounds.Top, bounds.Right, bounds.Bottom, taskbar ? "true" : "false"));

@@ -10,6 +10,7 @@ import { createFramePacer } from './frame-pacing.js';
 import { createPerfMonitor } from './perf-monitor.js';
 import { clipPrecipitation } from './precipitation-mask.js';
 import { shedOnWindowMotion, naturalSnowHeights, keepBallAboveTaskbar, canStackBall, needsAutoPlough, sweepSnowProfile, bladeTouchesBall } from './snow-behavior.js';
+import { santaStops, bladeCrosses, isOnBottomSurface } from './santa-visit.js';
 
 const canvas = document.querySelector('canvas');
 const ctx = canvas.getContext('2d');
@@ -157,8 +158,7 @@ function desktop(frame) {
     if (pile.rect.taskbar && (!settings.taskbar || settings.paused)) {
       piles.delete(id);
     } else if (!next) {
-      if (!next && now - (pile.lastSeen ??= now) < 125) continue;
-      spill(pile);
+      // An invisible or closed app must never leave a floating snow outline.
       piles.delete(id);
     } else {
       pile.lastSeen = now;
@@ -296,22 +296,31 @@ function updateParticles(dt) {
   const trail = [];
   accents = accents.filter(p => {
     if (p.kind === 'santa') {
+      // Santa and sleigh travel on the LOWER edge, not in the middle of the desktop.
       p.age += dt;
-      const t = Math.min(1, p.age / p.duration);
-      p.x = -170 + (width + 340) * t;
-      p.y = height * (.42 - .28 * Math.sin(Math.PI * t) + .062 * Math.sin(4 * Math.PI * t));
-      p.tilt = Math.atan2(height * (-.28 * Math.PI * Math.cos(Math.PI * t) +
-        .248 * Math.PI * Math.cos(4 * Math.PI * t)), width + 340);
-      if (p.x > 24 && p.x < width - 24 && p.age >= p.nextGift && gifts.length < 24) {
-        gifts.push({ x: p.x - 20, y: p.y + 14, vx: 76, vy: 18, spin: 0,
-          color: ['#ba354e', '#3d8b6c', '#4368a7'][gifts.length % 3] });
-        p.nextGift = p.age + Math.max(.7, p.duration / 6);
+      p.x = -175 + p.age * 190;
+      const floor = bottomSurfaceAt(Math.max(0, Math.min(width - 1, p.x))).top;
+      p.y = floor - 38;
+      p.tilt = 0;
+      while (p.stopIndex < p.stops.length && p.x >= p.stops[p.stopIndex].x) {
+        const stop = p.stops[p.stopIndex++];
+        const support = bottomSurfaceAt(stop.x);
+        if (stop.kind === 'gift' && gifts.length < 24) {
+          gifts.push({ x: stop.x, y: support.top - 8, spin: 0, vx: 0, vy: 0,
+            support: support.id, offset: stop.x - support.left,
+            color: ['#ba354e', '#3d8b6c', '#4368a7'][p.stopIndex % 3], fromSanta: true });
+        } else if (stop.kind === 'tree') {
+          trees.push({ anchor: { x: stop.x, y: support.top }, color: 'classic',
+            fromSanta: true });
+          if (trees.length > 16) trees.shift();
+        }
+        sceneDirty = true;
       }
-      if (Math.random() < dt * 37) trail.push({
-        kind: 'magic', x: p.x - 47, y: p.y + 7, vx: random(-65, -18), vy: random(-45, 6),
-        life: random(.38, .9), size: random(.7, 2.4),
+      if (Math.random() < dt * 18) trail.push({
+        kind: 'magic', x: p.x - 45, y: p.y + 6, vx: random(-48, -12), vy: random(-35, 4),
+        life: random(.28, .62), size: random(.7, 1.7),
       });
-      return t < 1;
+      return p.x < width + 170;
     }
     if (p.deposit !== undefined) {
       const x0 = p.x, y0 = p.y;
@@ -341,6 +350,7 @@ function updateParticles(dt) {
 
 function updateGifts(dt, byId) {
   for (const gift of gifts) {
+    if (plough?.carriedGifts.includes(gift)) continue;
     if (gift.support) {
       const support = gift.support === 'ground' ? ground.rect : byId.get(gift.support);
       if (support && (!support.taskbar || settings.taskbar)) {
@@ -570,10 +580,7 @@ function paintProfile(pile, covers, now) {
 
 function paintPiles(now) {
   paintProfile(ground, taskbars, now);
-  const visible = new Set(rectangles.map(rect => rect.id));
-  for (const [id, pile] of piles) {
-    if (!visible.has(id)) paintProfile(pile, rectangles, now);
-  }
+  // Do not paint stale piles for windows omitted by the native tracker.
   rectangles.forEach((rect, z) => {
     const pile = piles.get(rect.id);
     if (pile) paintProfile(pile, rectangles.slice(0, z), now);
@@ -605,7 +612,7 @@ function alignStack(root) {
 
 function startPlough() {
   if (plough || settings.weather === 'rain') return;
-  plough = { x: width + 70, load: 0, carried: [] };
+  plough = { x: width + 70, load: 0, carried: [], carriedGifts: [], carriedTrees: [] };
   lastPloughAt = performance.now();
 }
 
@@ -660,6 +667,24 @@ function updateSnowProps(dt, byId) {
       plough.load = Math.min(1800, plough.load + Math.PI * root.size ** 2 * 0.33);
       root.support = null;
     }
+    // Carried decorations follow the blade and leave with the machine.
+    for (const gift of gifts) {
+      if (plough.carriedGifts.includes(gift) || gift === undefined) continue;
+      if (!isOnBottomSurface(gift.y + 8, gift.x, x => bottomSurfaceAt(x).top, 18)) continue;
+      if (bladeCrosses(previousBlade, blade, gift.x, 10)) {
+        gift.support = null;
+        plough.carriedGifts.push(gift);
+      }
+    }
+    for (const tree of trees) {
+      if (plough.carriedTrees.includes(tree) || tree === heldTree?.tree) continue;
+      const anchor = resolveAnchor(tree.anchor);
+      if (!anchor || !isOnBottomSurface(anchor.y, anchor.x, x => bottomSurfaceAt(x).top, 17)) continue;
+      if (bladeCrosses(previousBlade, blade, anchor.x, 30)) {
+        tree.anchor = { x: anchor.x, y: anchor.y };
+        plough.carriedTrees.push(tree);
+      }
+    }
     let carriedOffset = 0;
     for (const root of plough.carried) {
       const nextX = plough.x - 50 - root.size - carriedOffset;
@@ -671,9 +696,27 @@ function updateSnowProps(dt, byId) {
       alignStack(root);
       carriedOffset += root.size * 1.7;
     }
+    for (const gift of plough.carriedGifts) {
+      gift.x = plough.x - 56 - carriedOffset;
+      gift.y = bottomSurfaceAt(Math.max(0, Math.min(width - 1, gift.x))).top - 8;
+      gift.vx = gift.vy = 0;
+      carriedOffset += 24;
+    }
+    for (const tree of plough.carriedTrees) {
+      const x = plough.x - 83 - carriedOffset;
+      tree.anchor = { x, y: bottomSurfaceAt(Math.max(0, Math.min(width - 1, x))).top };
+      tree.leanTarget = -0.08;
+      carriedOffset += 75;
+    }
     if (plough.x < -110 - carriedOffset) {
       const carried = new Set(plough.carried);
+      const carriedGifts = new Set(plough.carriedGifts);
+      const carriedTrees = new Set(plough.carriedTrees);
       balls = balls.filter(ball => !carried.has(stackRoot(ball)));
+      gifts = gifts.filter(gift => !carriedGifts.has(gift));
+      for (let i = trees.length - 1; i >= 0; i--) {
+        if (carriedTrees.has(trees[i])) trees.splice(i, 1);
+      }
       plough = undefined;
     }
   } else if (settings.weather !== 'rain' && settings.enabled && !settings.paused &&
@@ -884,7 +927,9 @@ function paintSnowProps(now) {
   }
   if (plough) {
     const x = Math.max(0, Math.min(width - 1, plough.x));
-    drawPlough(ctx, plough.x, bottomSurfaceAt(x).top - 4, plough.load, snowGrain, now);
+    // Draw the mound baseline at the taskbar edge. The old -4 offset left
+    // a dark strip between the accumulated snow and the ground.
+    drawPlough(ctx, plough.x, bottomSurfaceAt(x).top + 1, plough.load, snowGrain, now);
   }
 }
 
@@ -1008,13 +1053,14 @@ function drawScene(now, dt) {
   ctx.restore();
   paintPiles(now);
   rain.paint(ctx, rectangles);
-  for (const p of accents) if (p.kind !== 'chunk') paintParticle(p, now);
+  for (const p of accents) if (p.kind !== 'chunk' && p.kind !== 'santa') paintParticle(p, now);
   ctx.save();
-  // A final draw clip also protects the notification area from sprite overflow.
+  // Keep Santa, snowballs, the plough and decorations outside taskbar internals.
   clipPrecipitation(ctx, taskbars, width, height);
+  for (const p of accents) if (p.kind === 'santa') paintParticle(p, now);
   paintSnowProps(now);
-  ctx.restore();
   paintDecor(now, dt);
+  ctx.restore();
   ctx.restore();
 }
 wintermas.onDesktop(desktop);
@@ -1047,8 +1093,13 @@ wintermas.onAction(action => {
   } else if (action === 'clear') {
     startPlough();
   } else if (action === 'santa') {
-    accents.push({ kind: 'santa', x: -170, y: height * .42, age: 0,
-      duration: (width + 340) / 230, nextGift: 0, alpha: 1 });
+    if (accents.some(p => p.kind === 'santa')) return;
+    const onBottom = balls.filter(root => !root.stack && !root.broken &&
+      stackMembers(root).length >= 3 &&
+      isOnBottomSurface(root.y + root.size, root.x, x => bottomSurfaceAt(x).top, 22));
+    accents.push({ kind: 'santa', x: -175, y: bottomSurfaceAt(0).top - 38,
+      age: 0, stops: santaStops(onBottom.map(root => root.x), width),
+      stopIndex: 0, alpha: 1 });
   } else if (action === 'gather') {
     const pile = [...piles.values(), ground].find(candidate =>
       mouse.x >= candidate.rect.left && mouse.x < candidate.rect.right &&

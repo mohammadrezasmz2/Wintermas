@@ -16,6 +16,12 @@ test('fast motion throws a bounded fraction of snow, not the whole window', () =
   assert.ok([...bank].every(value => value > 0 && value < 9));
   assert.ok([...bank].every(value => value >= 0));
 });
+test('profile slopes down to zero at both window ends', () => {
+  const values = naturalSnowHeights(new Float32Array(120).fill(12), 5);
+  assert.ok(values[0] < values[3] && values[3] < values[10]);
+  assert.ok(values[119] < values[116] && values[116] < values[109]);
+  assert.ok(values[0] < 1.2 && values[119] < 1.2);
+});
 test('natural snowbank remains rounded and nonnegative', () => {
   const ridge = naturalSnowHeights(new Float32Array([0, 0, 10, 12, 12, 0, 0]), 17);
   assert.equal(ridge.length, 7);

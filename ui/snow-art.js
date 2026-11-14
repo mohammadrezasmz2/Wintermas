@@ -112,8 +112,8 @@ export function drawPlough(ctx, x, y, load, texture, now) {
     ctx.quadraticCurveTo(-40, -peak * 0.85, -53, -peak);
     ctx.bezierCurveTo(-57 - length * 0.16, -peak * 1.04,
       -50 - length * 0.62, -peak * 0.63,
-      -36 - length, -2);
-    ctx.quadraticCurveTo(-30 - length, 0, -36, 0);
+      -36 - length, 2);
+    ctx.quadraticCurveTo(-30 - length, 3, -36, 3);
     ctx.closePath();
     ctx.fillStyle = fill;
     ctx.fill();
