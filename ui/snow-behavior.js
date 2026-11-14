@@ -11,7 +11,8 @@ export function shedOnWindowMotion(profile, motion, dt) {
   const acceleration = Math.hypot(vx - lastVx, vy - lastVy) / time;
   const dislodged = [];
   if (!profile.length || Math.abs(dx) + Math.abs(dy) < 1 ||
-      (Math.hypot(vx, vy) < 260 && acceleration < 4600)) {
+      (Math.hypot(vx, vy) < 260 && acceleration < 4600 &&
+        !(dy < -1.8 && vy < -105))) {
     return { vx, vy, dislodged };
   }
   const upward = dy < -2;

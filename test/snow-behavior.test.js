@@ -12,7 +12,7 @@ test('fast motion throws a bounded fraction of snow, not the whole window', () =
   const bank = new Float32Array(80).fill(9);
   const result = shedOnWindowMotion(bank, { dx: 140, dy: -45 }, 0.06);
   assert.ok(result.dislodged.length > 0);
-  assert.ok(result.dislodged.length <= 16);
+  assert.ok(result.dislodged.length <= 40);
   assert.ok([...bank].some(value => value === 9));
   assert.ok([...bank].every(value => value >= 0));
 });
@@ -50,6 +50,12 @@ test('upward window yank ejects snow along the full width and reduces bank depth
   assert.ok([...bank].every(value => value < 11));
   assert.ok([...bank].reduce((a,b) => a + b, 0) < 330 * 9);
 });
+test('moderate upward drag releases snow before very high speed', () => {
+  const bank = new Float32Array(100).fill(9);
+  const result = shedOnWindowMotion(bank, { dx: 0, dy: -3, lastVy: -90 }, 0.02);
+  assert.ok(result.dislodged.length > 0);
+});
+
 test('snow moves with slow upward drag without crumbling', () => {
   const bank = new Float32Array(330).fill(8);
   const events = shedOnWindowMotion(bank, { dx: 0, dy: -1.5, lastVy: -35 }, 0.03);

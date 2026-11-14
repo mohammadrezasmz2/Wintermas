@@ -185,9 +185,13 @@ function desktop(frame) {
           const x = next.left + (chunk.index + 0.5) * column;
           // When moving UP, launch from the OLD location, so chunks visibly
           // lag behind the ascending window instead of reattaching to it.
-          const y = Math.max(next.top - 16, old.top - pile.profile[chunk.index] - 3);
+          // Emit above the NEW rim: chunks drawn inside the open window are
+          // correctly occluded and would otherwise appear to stay glued to it.
+          const y = next.top - Math.max(8, pile.profile[chunk.index]) - random(7, 16);
+          const launchVy = next.top < old.top
+            ? Math.min(-65, chunk.vy - 125) : chunk.vy - 65;
           releaseSnow(x, y, chunk.amount, chunk.vx + random(-55, 55),
-            chunk.vy + random(-35, 10), id);
+            launchVy + random(-35, 5), id);
         }
       }
       pile.rect = next;
