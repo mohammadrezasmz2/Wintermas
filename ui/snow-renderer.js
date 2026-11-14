@@ -8,7 +8,7 @@ varying float alpha;
 void main() {
   vec2 p = flake.xy / viewport;
   gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
-  gl_PointSize = max(1.0, flake.z * scale * 3.15);
+  gl_PointSize = max(1.0, flake.z * scale);
   alpha = flake.w;
 }
 `;

@@ -5,7 +5,7 @@ import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 
-const defaults = { enabled: false, intensity: 65, wind: 15, snowSpeed: 100, rainSpeed: 100, autumnSpeed: 100, taskbar: true, paused: true, startup: false, weather: 'snow' };
+const defaults = { enabled: false, intensity: 65, wind: 15, snowSpeed: 100, snowDiameter: 5, rainSpeed: 100, autumnSpeed: 100, taskbar: true, paused: true, startup: false, weather: 'snow' };
 const collapsed = { width: 96, height: 54 };
 const expanded = { width: 342, height: 735 };
 const appPath = app.getAppPath();
@@ -177,10 +177,10 @@ function syncVisibility() {
 
 async function update(patch) {
   if (!patch || typeof patch !== 'object') return settings;
-  for (const key of ['intensity', 'wind', 'snowSpeed', 'rainSpeed', 'autumnSpeed']) {
+  for (const key of ['intensity', 'wind', 'snowSpeed', 'snowDiameter', 'rainSpeed', 'autumnSpeed']) {
     if (!Number.isFinite(patch[key])) continue;
-    const min = key === 'wind' ? -100 : key.endsWith('Speed') ? 25 : 0;
-    const max = key.endsWith('Speed') ? 250 : 100;
+    const min = key === 'wind' ? -100 : key === 'snowDiameter' ? 2 : key.endsWith('Speed') ? 25 : 0;
+    const max = key === 'snowDiameter' ? 12 : key.endsWith('Speed') ? 250 : 100;
     settings[key] = Math.max(min, Math.min(max, patch[key]));
   }
   for (const key of ['enabled', 'paused', 'taskbar', 'startup']) {

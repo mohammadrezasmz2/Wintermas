@@ -14,6 +14,7 @@ import { shedOnWindowMotion, naturalSnowHeights, keepBallAboveTaskbar, canStackB
 import { santaStops, bladeCrosses, isOnBottomSurface } from './santa-visit.js';
 import { shouldSpillMinimizedPile } from './window-snow.js';
 import { shakeSnowOffWindow } from './window-powder.js';
+import { snowDiameter, powderShares, setVisibleSnowDiameter } from './snow-diameter.js';
 import { dropTreeAt, fallTree } from './tree-physics.js';
 
 const canvas = document.querySelector('canvas');
@@ -137,12 +138,19 @@ function bottomSurfaceAt(x) {
 }
 
 function releaseSnow(x, y, depth, vx, vy, avoidId = null) {
-  if (accents.length > 780) return;
-  accents.push({
-    kind: 'chunk', x, y, vx, vy, alpha: 0.94, deposit: depth,
-    avoidId, avoidFor: avoidId ? 0.75 : 0,
-    size: Math.min(7, Math.sqrt(depth) * 1.6),
-  });
+  // A heavy window bank turns into MANY uniform-size powder flakes, rather
+  // than one giant clump whose rendered diameter depends on accumulated mass.
+  const shares = powderShares(depth, Math.max(0, 780 - accents.length));
+  const diameter = snowDiameter(settings.snowDiameter);
+  for (const deposit of shares) {
+    accents.push({
+      kind: 'chunk', x: x + random(-5, 5), y: y + random(-7, 7),
+      vx: vx + random(-35, 35), vy: vy + random(-40, 20),
+      alpha: 0.72, deposit,
+      avoidId, avoidFor: avoidId ? 0.75 : 0,
+      size: diameter,
+    });
+  }
 }
 
 function spill(pile) {
@@ -209,11 +217,7 @@ function desktop(frame) {
             if (accents.length >= 760) break;
             releaseSnow(x, y, particle.mass, random(-110, 110),
               random(-145, -55), id);
-            const puff = accents[accents.length - 1];
-            if (puff?.kind === 'chunk') {
-              puff.size = random(0.8, 2.0);
-              puff.alpha = random(0.62, 0.98);
-            }
+            // All released flakes use the same diameter as active snowfall.
           }
         } else {
           const motion = shedOnWindowMotion(pile.profile, {
@@ -248,7 +252,12 @@ function configure(next) {
     fraction = 0;
     snowReady = false;
   }
+  const diameterChanged = snowDiameter(settings.snowDiameter) !== snowDiameter(next.snowDiameter);
   settings = next;
+  if (diameterChanged) {
+    setVisibleSnowDiameter(particles, accents, settings.snowDiameter);
+    sceneDirty = true;
+  }
   if (next.enabled && !wasEnabled) {
     previous = nextFrame = undefined;
     frameRequest = setTimeout(frame, 0);
@@ -289,7 +298,7 @@ function spawnFlake() {
   const depth = Math.random() ** 1.65;
   return {
     kind: 'snow', x: random(0, width), y: -14, phase: random(0, Math.PI * 2),
-    alpha: 0.15 + depth * 0.58, size: 0.43 + depth * 1.65,
+    alpha: 0.72, size: snowDiameter(settings.snowDiameter),
     fall: 36 + depth * 106, vx: random(-7, 7),
     sway: random(4, 19), rate: random(0.6, 1.8), foreground: Math.random() < 0.18,
   };
@@ -768,7 +777,8 @@ function updateSnowProps(dt, byId) {
         const frontX = Math.max(0, Math.min(width - 1, blade));
         accents.push({
           kind: 'chunk', x: blade - random(0, 20), y: bottomSurfaceAt(frontX).top - random(5, 20),
-          vx: random(-115, -30), vy: random(-115, -40), size: random(1, 2.5), life: 0.6,
+          vx: random(-115, -30), vy: random(-115, -40),
+          size: snowDiameter(settings.snowDiameter), alpha: 0.72, life: 0.6,
         });
       }
     } else plough.load = Math.max(0, plough.load - dt * 28);
@@ -1083,10 +1093,8 @@ function paintParticle(p, now) {
   const { x, y, size, kind } = p;
   ctx.globalAlpha = p.alpha ?? Math.min(1, p.life * 2.5);
   if (kind === 'snow' || kind === 'chunk') {
-    const span = size * 2.9;
-    const tail = kind === 'snow' ? Math.min(size * 1.25, p.vy * 0.013) : 0;
-    const offset = Math.max(-1.5, Math.min(1.5, (p.swayVelocity ?? 0) * .013));
-    ctx.drawImage(flakeSprite, x - span / 2 - offset, y - span / 2 - tail, span, span + tail);
+    const span = size * 1.48;
+    ctx.drawImage(flakeSprite, x - span / 2, y - span / 2, span, span);
   } else if (kind === 'magic') {
     ctx.fillStyle = '#ffd989';
     ctx.beginPath();
@@ -1100,19 +1108,8 @@ function paintParticle(p, now) {
 }
 
 function paintSnowFallback() {
-  ctx.fillStyle = '#eaf3ff';
-  for (let band = 0; band < 4; band++) {
-    ctx.globalAlpha = (band + 1) * .19;
-    ctx.beginPath();
-    for (const flake of particles) {
-      if (Math.min(3, Math.floor(flake.alpha * 5)) !== band) continue;
-      const radius = Math.max(.58, flake.size * .84);
-      ctx.moveTo(flake.x + radius, flake.y);
-      ctx.arc(flake.x, flake.y, radius, 0, Math.PI * 2);
-    }
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
+  // Use exactly the same flake sprite and diameter as window powder.
+  for (const flake of particles) paintParticle(flake, 0);
 }
 
 function frame(timestamp) {

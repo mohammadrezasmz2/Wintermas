@@ -94,6 +94,9 @@ function show(settings) {
   id('options').disabled = !settings.enabled;
   id('snow').checked = !settings.paused;
   id('taskbar').checked = settings.taskbar;
+  id('snow-diameter').value = settings.snowDiameter ?? 5;
+  id('snow-diameter-value').textContent = id('snow-diameter').value + ' px';
+  paint('snow-diameter');
   for (const key of ['intensity', 'wind']) {
     id(key).value = settings[key];
     id(key + '-value').textContent = settings[key] + ' %';
@@ -132,6 +135,12 @@ for (const key of ['intensity', 'wind']) {
   id(key).addEventListener('input', () => { id(key + '-value').textContent = id(key).value + ' %'; paint(key); });
   id(key).addEventListener('change', () => update({ [key]: Number(id(key).value) }));
 }
+id('snow-diameter').addEventListener('input', () => {
+  id('snow-diameter-value').textContent = id('snow-diameter').value + ' px';
+  paint('snow-diameter');
+});
+id('snow-diameter').addEventListener('change', () =>
+  update({ snowDiameter: Number(id('snow-diameter').value) }));
 id('speed').addEventListener('input', () => {
   id('speed-value').textContent = id('speed').value + ' %';
   paint('speed');
@@ -182,6 +191,7 @@ function showWeather(settings) {
   id('autumn-actions').hidden = weather !== 'autumn';
   document.querySelector('.decor').hidden = weather === 'autumn';
   id('taskbar-option').hidden = weather === 'rain';
+  id('snow-diameter-option').hidden = weather !== 'snow';
   document.querySelector('#taskbar-option > span').textContent =
     weather === 'autumn' ? 'Leaves on the taskbar' : 'Snow on the taskbar';
   document.querySelector('.hint').textContent = weather === 'autumn'
