@@ -99,7 +99,8 @@ function show(settings) {
     id(key + '-value').textContent = settings[key] + ' %';
     paint(key);
   }
-  const speed = settings.weather === 'rain' ? settings.rainSpeed : settings.snowSpeed;
+  const speed = settings.weather === 'rain' ? settings.rainSpeed :
+    settings.weather === 'autumn' ? settings.autumnSpeed : settings.snowSpeed;
   id('speed').value = speed ?? 100;
   id('speed-value').textContent = (speed ?? 100) + ' %';
   paint('speed');
@@ -137,7 +138,8 @@ id('speed').addEventListener('input', () => {
 });
 id('speed').addEventListener('change', () => {
   const weather = document.querySelector('input[name=weather]:checked')?.value;
-  update({ [weather === 'rain' ? 'rainSpeed' : 'snowSpeed']: Number(id('speed').value) });
+  update({ [weather === 'rain' ? 'rainSpeed' : weather === 'autumn' ?
+    'autumnSpeed' : 'snowSpeed']: Number(id('speed').value) });
 });
 for (const button of document.querySelectorAll('[data-action]')) {
   button.addEventListener('click', async () => {
@@ -164,16 +166,30 @@ id('light-color').addEventListener('change', () => {
 });
 wintermas.onSettings(show);
 wintermas.settings().then(show).catch(report);
-/* ---- v0.2: weather selector (snow / rain) ---- */
+/* ---- Independent Snow, Rain and Autumn modes ---- */
 function showWeather(settings) {
-  const weather = settings.weather === 'rain' ? 'rain' : 'snow';
+  const weather = ['snow', 'rain', 'autumn'].includes(settings.weather)
+    ? settings.weather : 'snow';
   document.body.classList.toggle('theme-rain', weather === 'rain');
-  for (const input of document.querySelectorAll('input[name=weather]')) input.checked = input.value === weather;
-  id('fall-label').textContent = weather === 'rain' ? 'Rainfall' : 'Snowfall';
-  id('speed-label').textContent = weather === 'rain' ? 'Rain speed' : 'Snow speed';
-  id('snow-actions').hidden = weather === 'rain';
+  document.body.classList.toggle('theme-autumn', weather === 'autumn');
+  for (const input of document.querySelectorAll('input[name=weather]'))
+    input.checked = input.value === weather;
+  id('fall-label').textContent = weather === 'rain' ? 'Rainfall' :
+    weather === 'autumn' ? 'Falling leaves' : 'Snowfall';
+  id('speed-label').textContent = weather === 'rain' ? 'Rain speed' :
+    weather === 'autumn' ? 'Leaf speed' : 'Snow speed';
+  id('snow-actions').hidden = weather !== 'snow';
+  id('autumn-actions').hidden = weather !== 'autumn';
+  document.querySelector('.decor').hidden = weather === 'autumn';
   id('taskbar-option').hidden = weather === 'rain';
-  const speed = weather === 'rain' ? settings.rainSpeed : settings.snowSpeed;
+  document.querySelector('#taskbar-option > span').textContent =
+    weather === 'autumn' ? 'Leaves on the taskbar' : 'Snow on the taskbar';
+  document.querySelector('.hint').textContent = weather === 'autumn'
+    ? 'Move the mouse through leaves to swirl them. Swipe over piles to toss them back into the air.'
+    : 'Click and drag across a snowbank to roll a snowball.';
+  document.querySelector('.hint').hidden = weather === 'rain';
+  const speed = weather === 'rain' ? settings.rainSpeed : weather === 'autumn' ?
+    settings.autumnSpeed : settings.snowSpeed;
   id('speed').value = speed ?? 100;
   id('speed-value').textContent = (speed ?? 100) + ' %';
   paint('speed');

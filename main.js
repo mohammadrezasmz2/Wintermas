@@ -5,7 +5,7 @@ import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 
-const defaults = { enabled: false, intensity: 65, wind: 15, snowSpeed: 100, rainSpeed: 100, taskbar: true, paused: true, startup: false, weather: 'snow' };
+const defaults = { enabled: false, intensity: 65, wind: 15, snowSpeed: 100, rainSpeed: 100, autumnSpeed: 100, taskbar: true, paused: true, startup: false, weather: 'snow' };
 const collapsed = { width: 96, height: 54 };
 const expanded = { width: 342, height: 735 };
 const appPath = app.getAppPath();
@@ -18,7 +18,7 @@ let quitting = false, locked = false, tracking = false;
 let save = Promise.resolve();
 const overlays = new Map();
 const packagedEntry = process.defaultApp ? [app.getAppPath(), '--quiet'] : ['--quiet'];
-const weathers = ['snow', 'rain'];
+const weathers = ['snow', 'rain', 'autumn'];
 let displayCache;
 const diagnostics = createDiagnostics(app);
 // Chromium may treat a click-through overlay as occluded and pause its frames; keep it rendering.
@@ -34,13 +34,15 @@ function trayMenu() {
     { label: settings.enabled ? 'Turn Christmas mode off' : 'Turn Christmas mode on', click: () => {
       update({ enabled: !settings.enabled }).catch(console.error);
     } },
-    { label: 'Turn ' + (settings.weather === 'rain' ? 'rainfall' : 'snowfall') +
+    { label: 'Turn ' + (settings.weather === 'rain' ? 'rainfall' :
+      settings.weather === 'autumn' ? 'falling leaves' : 'snowfall') +
       (settings.paused ? ' on' : ' off'), enabled: settings.enabled, click: () => {
       update({ paused: !settings.paused }).catch(console.error);
     } },
     { label: 'Weather', enabled: settings.enabled, submenu: [
-      { label: 'Snow', type: 'radio', checked: settings.weather !== 'rain', click: () => update({ weather: 'snow' }).catch(console.error) },
+      { label: 'Snow', type: 'radio', checked: settings.weather === 'snow', click: () => update({ weather: 'snow' }).catch(console.error) },
       { label: 'Rain', type: 'radio', checked: settings.weather === 'rain', click: () => update({ weather: 'rain' }).catch(console.error) },
+      { label: 'Autumn', type: 'radio', checked: settings.weather === 'autumn', click: () => update({ weather: 'autumn' }).catch(console.error) },
     ] },
     { type: 'separator' },
     { label: 'Open diagnostic log', click: () => { shell.openPath(diagnostics.file).catch(console.error); } },
@@ -175,7 +177,7 @@ function syncVisibility() {
 
 async function update(patch) {
   if (!patch || typeof patch !== 'object') return settings;
-  for (const key of ['intensity', 'wind', 'snowSpeed', 'rainSpeed']) {
+  for (const key of ['intensity', 'wind', 'snowSpeed', 'rainSpeed', 'autumnSpeed']) {
     if (!Number.isFinite(patch[key])) continue;
     const min = key === 'wind' ? -100 : key.endsWith('Speed') ? 25 : 0;
     const max = key.endsWith('Speed') ? 250 : 100;
@@ -309,7 +311,7 @@ async function smokeTest() {
     )));
     const panelReady = insideWorkArea && panelCheck.iconReady && panelCheck.open &&
       panelCheck.disabledByDefault && panelCheck.enabledAfterToggle &&
-      panelCheck.actions === 7 && panelCheck.bottom <= panelCheck.height;
+      panelCheck.actions === 9 && panelCheck.bottom <= panelCheck.height;
     if (!tracking || !panelReady || !renderers.length || !renderers.every(Boolean)) {
       throw new Error(JSON.stringify({ tracking, panelCheck, renderers }));
     }
@@ -422,6 +424,7 @@ async function start() {
       }
     } else if (['clear', 'snowball', 'santa', 'reset', 'decor-reset'].includes(action)) {
       if (settings.weather === 'rain' && action !== 'decor-reset') return;
+      if (settings.weather === 'autumn' && !['clear', 'reset', 'decor-reset'].includes(action)) return;
       for (const win of overlays.values()) send(win, 'effect:action', action);
     }
   });

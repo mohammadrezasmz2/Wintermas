@@ -6,6 +6,7 @@ import { drawGarland, drawTree, drawGift } from './christmas-decor.js';
 import { createSnowRenderer } from './snow-renderer.js';
 import { makeRope, brushRope, stepRope } from './garland-physics.js';
 import { createRain } from './rain.js';
+import { createAutumn } from './autumn.js';
 import { createFramePacer } from './frame-pacing.js';
 import { createPerfMonitor } from './perf-monitor.js';
 import { clipPrecipitation } from './precipitation-mask.js';
@@ -51,6 +52,7 @@ let nextSantaVisitAt = 0;
 
 // ---- v0.2: smooth pacing, dirty redraws, rain weather, diagnostics ----
 const rain = createRain(document.querySelector('#rain'));
+const autumn = createAutumn();
 let sceneDirty = false;
 const diagnostics = entry => window.wintermas?.log?.(entry);
 const pacer = createFramePacer(frame, {
@@ -83,6 +85,7 @@ function applyWeather(before, next) {
   // Clear both weather engines immediately. Old flakes, snowbanks and snowballs
   // must not remain in Rain; old drops and wet window edges must not remain in Snow.
   rain.clear();
+  autumn.clear();
   particles = [];
   accents = [];
   balls = [];
@@ -122,6 +125,7 @@ function resize() {
   const particleScale = Math.min(devicePixelRatio, 2, Math.sqrt(3_000_000 / (width * height)));
   snowRenderer?.resize(width, height, particleScale);
   rain.resize(width, height, particleScale);
+  autumn.resize(width, height);
   sceneDirty = true;
   const rect = { id: 'ground', left: 0, right: width, top: height, bottom: height + 1 };
   ground = { rect, profile: new Float32Array(Math.ceil(width / column)), kind: 'snow' };
@@ -163,7 +167,10 @@ function desktop(frame) {
   if (placement || geometryChanged(rectangles, frame.rectangles)) sceneDirty = true;
   rectangles = frame.rectangles;
   taskbars = rectangles.filter(rect => rect.taskbar);
-  updatePointer(frame.mouse, elapsed);
+  if (settings.weather === 'autumn') {
+    autumn.syncGeometry(rectangles, frame.minimized);
+    autumn.onPointer(frame.mouse, elapsed);
+  } else updatePointer(frame.mouse, elapsed);
   mouse = frame.mouse;
   const byId = new Map(rectangles.map(rect => [rect.id, rect]));
   for (const [id, pile] of piles) {
@@ -289,6 +296,11 @@ function spawnFlake() {
 }
 
 function updateParticles(dt) {
+  if (settings.weather === 'autumn') {
+    autumn.update(dt, settings);
+    updateAutumnPlough(dt);
+    return;
+  }
   const budget = snowRenderer ? 950 : 360;
   if (!settings.paused && settings.intensity > 0 && settings.weather !== 'rain') {
     if (!snowReady) {
@@ -689,6 +701,24 @@ function dispatchQueuedSantaVisit() {
   if (people.length) launchSantaVisit(people.map(root => root.x));
 }
 
+function updateAutumnPlough(dt) {
+  if (plough) {
+    const previousX = plough.x;
+    plough.x -= 245 * dt;
+    const picked = autumn.sweep(previousX - 38, plough.x - 38);
+    // Real collected leaves make the pile grow gradually, not a white mound.
+    plough.load = Math.min(1800, Math.max(0,
+      plough.load + picked * 17 - (picked ? 0 : dt * 7)));
+    if (plough.x < -150) plough = undefined;
+  } else if (settings.enabled && !settings.paused && settings.taskbar &&
+      performance.now() >= nextAutoPloughCheck) {
+    nextAutoPloughCheck = performance.now() + 1700;
+    if (performance.now() - lastPloughAt > 30_000 && autumn.needsSweep()) {
+      startPlough();
+    }
+  }
+}
+
 function startPlough() {
   if (plough || settings.weather === 'rain') return;
   plough = { x: width + 70, load: 0, carried: [], carriedGifts: [], carriedTrees: [] };
@@ -1029,7 +1059,11 @@ function paintSnowProps(now) {
     const x = Math.max(0, Math.min(width - 1, plough.x));
     // Draw the mound baseline at the taskbar edge. The old -4 offset left
     // a dark strip between the accumulated snow and the ground.
-    drawPlough(ctx, plough.x, bottomSurfaceAt(x).top + 1, plough.load, snowGrain, now);
+    const surfaceY = bottomSurfaceAt(x).top + 1;
+    if (settings.weather === 'autumn') {
+      drawPlough(ctx, plough.x, surfaceY, 0, snowGrain, now);
+      autumn.drawMound(ctx, plough.x, surfaceY, plough.load, now);
+    } else drawPlough(ctx, plough.x, surfaceY, plough.load, snowGrain, now);
   }
 }
 
@@ -1085,7 +1119,7 @@ function frame(timestamp) {
   // Vsync timestamps can sit slightly before a timer-driven frame; never let time run backwards.
   const now = Math.max(typeof timestamp === 'number' ? timestamp : performance.now(), previous ?? -Infinity);
   const interval = 1000 / 60;
-  if (settings.paused && !particles.length && !accents.length && !balls.length && !gifts.length &&
+  if (settings.paused && !autumn.active() && !particles.length && !accents.length && !balls.length && !gifts.length &&
       !placement && !plough && !garlands.length && !trees.length && !piles.size &&
       !ground.profile.some(Boolean) && !rain.active()) {
     // Clear the last animation frame once, then avoid sending empty frames to DWM.
@@ -1111,13 +1145,13 @@ function frame(timestamp) {
   updateWeather(dt);
   const sceneNeeded = !snowRenderer && particles.length || accents.length || balls.length ||
     gifts.length || placement || plough || garlands.length || trees.length || piles.size ||
-    ground.profile.some(Boolean) || rain.needsScene();
+    ground.profile.some(Boolean) || rain.needsScene() || autumn.active();
   const fastScene = !snowRenderer && particles.length || grabbed || heldTree || plough ||
     accents.length || balls.some(ball => !ball.support || Math.abs(ball.vx) > 1) ||
     gifts.some(gift => !gift.support) || garlands.some(garland => garland.rope.active > 0) ||
     trees.some(tree => tree.falling || Math.abs(tree.tilt ?? 0) > .003 ||
       Math.abs(tree.velocity ?? 0) > .02) ||
-    rain.fast();
+    rain.fast() || autumn.fast();
   if (sceneNeeded && (fastScene || sceneDirty || previousScene === undefined ||
       now - previousScene >= staticSceneInterval())) {
     const sceneDt = Math.min(.08, (now - (previousScene ?? now)) / 1000);
@@ -1153,6 +1187,7 @@ function drawScene(now, dt) {
   for (const p of accents) if (p.kind === 'chunk') paintParticle(p, now);
   ctx.restore();
   paintPiles(now);
+  if (settings.weather === 'autumn') autumn.paint(ctx, now);
   rain.paint(ctx, rectangles);
   for (const p of accents) if (p.kind !== 'chunk' && p.kind !== 'santa') paintParticle(p, now);
   ctx.save();
@@ -1160,7 +1195,7 @@ function drawScene(now, dt) {
   clipPrecipitation(ctx, taskbars, width, height);
   for (const p of accents) if (p.kind === 'santa') paintParticle(p, now);
   paintSnowProps(now);
-  paintDecor(now, dt);
+  if (settings.weather !== 'autumn') paintDecor(now, dt);
   ctx.restore();
   ctx.restore();
 }
@@ -1192,6 +1227,7 @@ wintermas.onAction(action => {
     grabbed = undefined;
     plough = undefined;
     fraction = 0;
+    autumn.clear();
     cancelPlacement();
   } else if (action === 'clear') {
     startPlough();

@@ -103,7 +103,7 @@ body.open main>:not(fieldset),body.open #options>*{animation:rise .55s var(--eas
 ::-webkit-scrollbar-thumb:hover{background:#ffffff4a}
 :focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}/* ---- v0.2: weather selector ---- */
-.weather{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:3px;margin:4px 0 3px;border-radius:10px;background:#0000002b;border:1px solid var(--line)}
+.weather{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;padding:3px;margin:4px 0 3px;border-radius:10px;background:#0000002b;border:1px solid var(--line)}
 .weather-option{position:relative;display:flex;align-items:center;justify-content:center;gap:6px;height:27px;border-radius:7px;font-size:12px;color:var(--muted);cursor:pointer;transition:background .3s,color .3s,box-shadow .3s}
 .weather-option input{position:absolute;opacity:0;width:1px;height:1px;margin:0;pointer-events:none}
 .weather-option .ico{width:14px;height:14px}
@@ -136,3 +136,18 @@ body.theme-rain .slider input:active::-webkit-slider-thumb{box-shadow:0 1px 4px 
 body.flyout header{-webkit-app-region:no-drag}
 body.flyout .handle{display:none}
 body.flyout #toggle{pointer-events:none}
+
+/* Amber-and-copper autumn UI matches the warm natural foliage. */
+body.theme-autumn{--muted:#c6b3a1;--gold:#edbb75;--mint:#e9ab62;--line:#f3bd7129}
+body.theme-autumn .widget{background:linear-gradient(180deg,#30251d,#1b1d16) padding-box,
+  linear-gradient(165deg,#f2c37b88,#a8753e40 38%,#5d693b55) border-box}
+body.theme-autumn .widget::before{background:radial-gradient(ellipse 85% 56% at 50% -8%,#94572b75,transparent 72%)}
+body.theme-autumn .widget::after{background:radial-gradient(ellipse 70% 45% at 50% -5%,#d69d4c55,transparent 70%)}
+body.theme-autumn .master{background:linear-gradient(105deg,#55402a,#3a3020);border-color:#e6b67655}
+body.theme-autumn.enabled .master{background:linear-gradient(105deg,#6a4a2c,#473622);
+  border-color:#eabd7777;box-shadow:0 0 0 3px #d89a4f19,0 6px 20px #9b62282b}
+body.theme-autumn .switch input:checked{background:linear-gradient(90deg,#ba7332,#df994d);
+  border-color:#f0b87466;box-shadow:0 0 10px #d08b4e44}
+body.theme-autumn h2::after{background:linear-gradient(90deg,#e9b47344,transparent)}
+body.theme-autumn .palette select,body.theme-autumn .palette option{background:#382c22}
+body.theme-autumn .weather-option:has(input:checked){background:#e2a55e2c;color:#ffe4bc}
