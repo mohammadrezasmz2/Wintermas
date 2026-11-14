@@ -2,6 +2,7 @@
 // Self-contained so the snow code paths stay untouched; overlay.js only calls the methods below.
 import { landing } from './geometry.js';
 import { createRainRenderer, RAIN_GPU_BUDGET } from './rain-renderer.js';
+import { clipPrecipitation } from './precipitation-mask.js';
 
 const random = (min, max) => min + Math.random() * (max - min);
 const CPU_BUDGET = 520;
@@ -59,6 +60,7 @@ export function createRain(canvas) {
 
   function update(dt, settings, rectangles) {
     const raining = settings.enabled && settings.weather === 'rain' && !settings.paused && settings.intensity > 0;
+    const speed = Math.max(0.25, Math.min(2.5, (settings.rainSpeed ?? 100) / 100));
     if (raining) {
       ensureRenderer();
       const budget = renderer ? RAIN_GPU_BUDGET : CPU_BUDGET;
@@ -67,7 +69,7 @@ export function createRain(canvas) {
         ready = true;
         for (let i = drops.length; i < target * 0.8; i++) drops.push(spawnDrop(random(-60, height)));
       }
-      fraction += target * 1300 / (height + 90) * dt;
+      fraction += target * 1300 / (height + 90) * dt * speed;
       while (fraction >= 1) {
         fraction--;
         if (drops.length < target) drops.push(spawnDrop());
@@ -83,8 +85,8 @@ export function createRain(canvas) {
       const d = drops[index];
       const x0 = d.x, y0 = d.y;
       d.vx = wind * (2.2 + d.depth * 2.6);
-      d.x += d.vx * dt;
-      d.y += d.vy * dt;
+      d.x += d.vx * dt * speed;
+      d.y += d.vy * dt * speed;
       if (!d.foreground) {
         const hit = landing(rectangles, x0, y0, d.x, d.y, settings.taskbar);
         if (hit) {
@@ -232,9 +234,12 @@ export function createRain(canvas) {
       renderer?.draw(drops, rectangles, taskbar);
     },
     paint(ctx, rectangles) {
-      if (wet.size) paintWetEdges(ctx, rectangles);
+      ctx.save();
+      clipPrecipitation(ctx, rectangles, width, height);
       if (!renderer && drops.length) paintDropsFallback(ctx);
       if (splashes.length) paintSplashes(ctx);
+      ctx.restore();
+      if (wet.size) paintWetEdges(ctx, rectangles);
     },
     clear() {
       drops = [];

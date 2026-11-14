@@ -8,6 +8,7 @@ import { makeRope, brushRope, stepRope } from './garland-physics.js';
 import { createRain } from './rain.js';
 import { createFramePacer } from './frame-pacing.js';
 import { createPerfMonitor } from './perf-monitor.js';
+import { clipPrecipitation } from './precipitation-mask.js';
 
 const canvas = document.querySelector('canvas');
 const ctx = canvas.getContext('2d');
@@ -70,35 +71,34 @@ function staticSceneInterval() {
 
 function applyWeather(before, next) {
   if ((before.weather ?? 'snow') === (next.weather ?? 'snow')) return;
+  // Clear both weather engines immediately. Old flakes, snowbanks and snowballs
+  // must not remain in Rain; old drops and wet window edges must not remain in Snow.
+  rain.clear();
+  particles = [];
+  accents = [];
+  balls = [];
+  gifts = [];
+  grabbed = undefined;
+  plough = undefined;
+  fraction = 0;
+  piles.clear();
+  if (ground) {
+    ground.profile.fill(0);
+    ground.raster = undefined;
+  }
+  capturePointer(false);
   snowReady = false;
   sceneDirty = true;
 }
 
-function meltSnow(dt) {
-  if (settings.weather !== 'rain' || settings.paused || settings.intensity <= 0) return;
-  const amount = dt * (0.3 + settings.intensity / 100 * 1.05);
-  for (const [id, pile] of [['ground', ground], ...piles]) {
-    const { profile } = pile;
-    let remaining = false;
-    for (let i = 0; i < profile.length; i++) {
-      if (profile[i] <= 0) continue;
-      profile[i] -= amount * (0.6 + profile[i] / 24);
-      if (profile[i] < 0.05) profile[i] = 0;
-      else remaining = true;
-    }
-    if (!remaining && pile !== ground) piles.delete(id);
-  }
-}
-
 function updateWeather(dt) {
-  meltSnow(dt);
   rain.update(dt, settings, rectangles);
   rain.draw(rectangles, settings.taskbar);
 }
 
 function resize() {
-  const detailBudget = snowRenderer ? 1_050_000 : 760_000;
-  const scale = Math.min(devicePixelRatio, Math.sqrt(detailBudget / (innerWidth * innerHeight)));
+  // Scene contains snowbanks and the plough: unlike particle layers it needs crisp edges.
+  const scale = Math.max(1, Math.min(devicePixelRatio, 2, Math.sqrt(8_000_000 / (innerWidth * innerHeight))));
   if (width === innerWidth && height === innerHeight &&
       canvas.width === Math.round(width * scale) && canvas.height === Math.round(height * scale)) return;
   width = innerWidth;
@@ -106,12 +106,19 @@ function resize() {
   canvas.width = Math.round(width * scale);
   canvas.height = Math.round(height * scale);
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
-  snowRenderer?.resize(width, height, Math.min(devicePixelRatio, Math.sqrt(1_100_000 / (width * height))));
-  rain.resize(width, height, Math.min(devicePixelRatio, Math.sqrt(1_100_000 / (width * height))));
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  const particleScale = Math.min(devicePixelRatio, 2, Math.sqrt(3_000_000 / (width * height)));
+  snowRenderer?.resize(width, height, particleScale);
+  rain.resize(width, height, particleScale);
   sceneDirty = true;
   const rect = { id: 'ground', left: 0, right: width, top: height, bottom: height + 1 };
   ground = { rect, profile: new Float32Array(Math.ceil(width / column)), kind: 'snow' };
   snowReady = false;
+}
+
+function bottomSurfaceAt(x) {
+  return bottomTaskbarAt(taskbars, x, height) ?? ground.rect;
 }
 
 function releaseSnow(x, y, depth, vx, vy) {
@@ -246,7 +253,7 @@ function updateParticles(dt) {
         particles.push(flake);
       }
     }
-    fraction += (snowRenderer ? 110 : 76) * settings.intensity / 100 * dt * Math.min(1.5, width / 1450);
+    fraction += (snowRenderer ? 110 : 76) * settings.intensity / 100 * dt * Math.min(1.5, width / 1450) * ((settings.snowSpeed ?? 100) / 100);
     while (fraction >= 1) {
       fraction--;
       if (particles.length < budget) particles.push(spawnFlake());
@@ -259,7 +266,7 @@ function updateParticles(dt) {
   for (let index = 0; index < particles.length; index++) {
     const p = particles[index];
     const x0 = p.x, y0 = p.y;
-    snowStepInPlace(p, wind + p.vx, dt);
+    snowStepInPlace(p, wind + p.vx, dt * ((settings.snowSpeed ?? 100) / 100));
     const hit = p.foreground ? null : landing(rectangles, x0, y0, p.x, p.y, settings.taskbar);
     if (hit) { addPile(hit); continue; }
     if (y0 <= height && p.y >= height) {
@@ -331,7 +338,8 @@ function updateGifts(dt, byId) {
     gift.y += gift.vy * dt;
     gift.spin += dt * 2;
     const hit = landing(rectangles, oldX, oldBottom, gift.x, gift.y + 8, settings.taskbar);
-    const support = hit?.rect ?? (gift.y + 8 >= height ? ground.rect : null);
+    const floor = bottomSurfaceAt(gift.x);
+    const support = hit?.rect ?? (gift.y + 8 >= floor.top ? floor : null);
     if (!support) continue;
     gift.y = support.top - 8;
     if (gift.vy > 100) {
@@ -477,16 +485,20 @@ function updatePileRaster(pile, now) {
   const rasterWidth = Math.ceil(rect.right - rect.left);
   if (rasterWidth < 1) return null;
   const cache = pile.raster ??= { canvas: document.createElement('canvas') };
-  const resized = cache.width !== rasterWidth || cache.profile?.length !== profile.length;
+  const rasterScale = Math.min(2, Math.max(1, devicePixelRatio));
+  const resized = cache.width !== rasterWidth || cache.scale !== rasterScale || cache.profile?.length !== profile.length;
   if (!resized && now - cache.updatedAt < 90) return cache;
   if (!resized && !profile.some((depth, i) => depth !== cache.profile[i])) return cache;
 
   const maxDepth = Math.max(5, ...profile);
   const rasterHeight = Math.max(24, Math.ceil(maxDepth) + 2);
   const surface = cache.canvas;
-  if (surface.width !== rasterWidth) surface.width = rasterWidth;
-  if (surface.height !== rasterHeight) surface.height = rasterHeight;
+  if (surface.width !== Math.ceil(rasterWidth * rasterScale)) surface.width = Math.ceil(rasterWidth * rasterScale);
+  if (surface.height !== Math.ceil(rasterHeight * rasterScale)) surface.height = Math.ceil(rasterHeight * rasterScale);
   const paint = surface.getContext('2d');
+  paint.setTransform(rasterScale, 0, 0, rasterScale, 0, 0);
+  paint.imageSmoothingEnabled = true;
+  paint.imageSmoothingQuality = 'high';
   const baseline = rasterHeight - 1;
   paint.clearRect(0, 0, rasterWidth, rasterHeight);
   const gradient = paint.createLinearGradient(0, baseline - maxDepth, 0, baseline + 1);
@@ -510,6 +522,8 @@ function updatePileRaster(pile, now) {
     paint.fill();
   }
   cache.width = rasterWidth;
+  cache.height = rasterHeight;
+  cache.scale = rasterScale;
   cache.baseline = baseline;
   cache.profile = profile.slice();
   cache.updatedAt = now;
@@ -530,7 +544,7 @@ function paintProfile(pile, covers, now) {
     ctx.rect(cover.left, cover.top, cover.right - cover.left, cover.bottom - cover.top);
     ctx.clip('evenodd');
   }
-  ctx.drawImage(raster.canvas, rect.left, top);
+  ctx.drawImage(raster.canvas, rect.left, top, raster.width, raster.height);
   ctx.restore();
 }
 
@@ -598,7 +612,8 @@ function updateSnowProps(dt, byId) {
     if (heap[heap.length - 1] > 1.6) {
       const amount = Math.min(heap[heap.length - 1], dt * 24);
       heap[heap.length - 1] -= amount;
-      releaseSnow(plough.x - 30 - heap.length * 3, height - amount - 2, amount, -120, -35);
+      const x = Math.max(0, Math.min(width - 1, plough.x));
+      releaseSnow(plough.x - 30 - heap.length * 3, bottomSurfaceAt(x).top - amount - 2, amount, -120, -35);
     }
     if (plough.x < -80) plough = undefined;
   }
@@ -610,8 +625,9 @@ function updateSnowProps(dt, byId) {
       ball.support = null;
     }
     if (ball.support) {
-      const rect = ball.support === 'ground' ? ground.rect : byId.get(ball.support);
+      const rect = ball.support === 'ground' ? bottomSurfaceAt(ball.x) : byId.get(ball.support);
       if (rect && (!rect.taskbar || settings.taskbar)) {
+        ball.support = rect.id;
         ball.x += rect.left - ball.previousSupport.left;
         ball.y = rect.top - ball.size;
         ball.previousSupport = rect;
@@ -645,7 +661,8 @@ function updateSnowProps(dt, byId) {
       ball.vx = ball.vy = 0;
       continue;
     }
-    const support = hit?.rect ?? (ball.y + ball.size >= height ? ground.rect : null);
+    const floor = bottomSurfaceAt(ball.x);
+    const support = hit?.rect ?? (ball.y + ball.size >= floor.top ? floor : null);
     if (support) {
       ball.y = support.top - ball.size;
       ball.x = Math.max(ball.size * 0.35, Math.min(width - ball.size * 0.35, ball.x));
@@ -758,8 +775,9 @@ function updateBallPointer(next, dt) {
     const aboveBall = balls.some(other => stackRoot(other) !== ball && other.support &&
       Math.abs(other.x - ball.x) < other.size * 0.72 &&
       Math.abs(bottom - (other.y - other.size)) < 16);
-    const support = slow && !aboveBall && landing([...rectangles, ground.rect], ball.x, bottom - 12,
-      ball.x, bottom + 16, settings.taskbar)?.rect;
+    const floor = bottomSurfaceAt(ball.x);
+    const support = slow && !aboveBall && (landing([...rectangles, ground.rect], ball.x, bottom - 12,
+      ball.x, bottom + 16, settings.taskbar)?.rect ?? (bottom >= floor.top - 12 ? floor : null));
     if (support && ball.x > support.left && ball.x < support.right) {
       Object.assign(ball, { support: support.id, previousSupport: support,
         y: support.top - ball.size, vx: 0, vy: 0, thrown: false });
@@ -787,7 +805,10 @@ function paintSnowProps(now) {
   for (const head of balls) {
     if (head.stack?.stack && !head.stack.stack.stack) drawSnowman(ctx, head, head.stack);
   }
-  if (plough) drawPlough(ctx, plough.x, height - 3, plough.heap, snowGrain, now);
+  if (plough) {
+    const x = Math.max(0, Math.min(width - 1, plough.x));
+    drawPlough(ctx, plough.x, bottomSurfaceAt(x).top - 2, plough.heap, snowGrain, now);
+  }
 }
 
 // Paint flake sprites once. The soft edge keeps distant flakes from reading as white dots.
@@ -902,10 +923,15 @@ function drawScene(now, dt) {
       ctx.clip('evenodd');
     }
   }
+  // Clip only precipitation. Snowbanks remain visible above window top edges.
+  ctx.save();
+  clipPrecipitation(ctx, rectangles, width, height);
+  if (!snowRenderer && particles.length) paintSnowFallback();
+  for (const p of accents) if (p.kind === 'chunk') paintParticle(p, now);
+  ctx.restore();
   paintPiles(now);
   rain.paint(ctx, rectangles);
-  if (!snowRenderer && particles.length) paintSnowFallback();
-  for (const p of accents) paintParticle(p, now);
+  for (const p of accents) if (p.kind !== 'chunk') paintParticle(p, now);
   paintSnowProps(now);
   paintDecor(now, dt);
   ctx.restore();
@@ -913,6 +939,7 @@ function drawScene(now, dt) {
 wintermas.onDesktop(desktop);
 wintermas.onSettings(configure);
 wintermas.onAction(action => {
+  if (settings.weather === 'rain' && ['clear', 'snowball', 'santa', 'reset', 'gather'].includes(action)) return;
   if (action?.placement === 'garland' || action?.placement === 'tree') {
     placement = { kind: action.placement, color: action.color, deadline: performance.now() + 25000 };
     return;

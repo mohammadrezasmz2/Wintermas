@@ -99,6 +99,10 @@ function show(settings) {
     id(key + '-value').textContent = settings[key] + ' %';
     paint(key);
   }
+  const speed = settings.weather === 'rain' ? settings.rainSpeed : settings.snowSpeed;
+  id('speed').value = speed ?? 100;
+  id('speed-value').textContent = (speed ?? 100) + ' %';
+  paint('speed');
 }
 const update = patch => wintermas.update(patch).catch(report);
 id('hide-widget').addEventListener('click', async () => {
@@ -127,6 +131,14 @@ for (const key of ['intensity', 'wind']) {
   id(key).addEventListener('input', () => { id(key + '-value').textContent = id(key).value + ' %'; paint(key); });
   id(key).addEventListener('change', () => update({ [key]: Number(id(key).value) }));
 }
+id('speed').addEventListener('input', () => {
+  id('speed-value').textContent = id('speed').value + ' %';
+  paint('speed');
+});
+id('speed').addEventListener('change', () => {
+  const weather = document.querySelector('input[name=weather]:checked')?.value;
+  update({ [weather === 'rain' ? 'rainSpeed' : 'snowSpeed']: Number(id('speed').value) });
+});
 for (const button of document.querySelectorAll('[data-action]')) {
   button.addEventListener('click', async () => {
     try {
@@ -158,6 +170,13 @@ function showWeather(settings) {
   document.body.classList.toggle('theme-rain', weather === 'rain');
   for (const input of document.querySelectorAll('input[name=weather]')) input.checked = input.value === weather;
   id('fall-label').textContent = weather === 'rain' ? 'Rainfall' : 'Snowfall';
+  id('speed-label').textContent = weather === 'rain' ? 'Rain speed' : 'Snow speed';
+  id('snow-actions').hidden = weather === 'rain';
+  id('taskbar-option').hidden = weather === 'rain';
+  const speed = weather === 'rain' ? settings.rainSpeed : settings.snowSpeed;
+  id('speed').value = speed ?? 100;
+  id('speed-value').textContent = (speed ?? 100) + ' %';
+  paint('speed');
 }
 for (const input of document.querySelectorAll('input[name=weather]')) {
   input.addEventListener('change', () => { if (input.checked) update({ weather: input.value }); });

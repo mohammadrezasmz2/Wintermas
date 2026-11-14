@@ -5,9 +5,9 @@ import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 
-const defaults = { enabled: false, intensity: 65, wind: 15, taskbar: true, paused: true, startup: false, weather: 'snow' };
+const defaults = { enabled: false, intensity: 65, wind: 15, snowSpeed: 100, rainSpeed: 100, taskbar: true, paused: true, startup: false, weather: 'snow' };
 const collapsed = { width: 96, height: 54 };
-const expanded = { width: 342, height: 690 };
+const expanded = { width: 342, height: 735 };
 const appPath = app.getAppPath();
 const native = join(appPath.endsWith('.asar') ? process.resourcesPath : appPath, 'native', 'desktop.exe');
 
@@ -166,8 +166,11 @@ function syncVisibility() {
 
 async function update(patch) {
   if (!patch || typeof patch !== 'object') return settings;
-  for (const key of ['intensity', 'wind']) {
-    if (Number.isFinite(patch[key])) settings[key] = Math.max(key === 'wind' ? -100 : 0, Math.min(100, patch[key]));
+  for (const key of ['intensity', 'wind', 'snowSpeed', 'rainSpeed']) {
+    if (!Number.isFinite(patch[key])) continue;
+    const min = key === 'wind' ? -100 : key.endsWith('Speed') ? 25 : 0;
+    const max = key.endsWith('Speed') ? 250 : 100;
+    settings[key] = Math.max(min, Math.min(max, patch[key]));
   }
   for (const key of ['enabled', 'paused', 'taskbar', 'startup']) {
     if (typeof patch[key] === 'boolean') settings[key] = patch[key];
@@ -408,6 +411,7 @@ async function start() {
         send(win, 'effect:action', id === display.id ? { placement: action, color } : 'decor-cancel');
       }
     } else if (['clear', 'snowball', 'santa', 'reset', 'decor-reset'].includes(action)) {
+      if (settings.weather === 'rain' && action !== 'decor-reset') return;
       for (const win of overlays.values()) send(win, 'effect:action', action);
     }
   });

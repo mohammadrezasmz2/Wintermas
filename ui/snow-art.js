@@ -119,8 +119,18 @@ export function drawPlough(ctx, x, y, heap, texture, now) {
       ctx.fill();
     }
   }
+  ctx.shadowColor = '#091321aa';
+  ctx.shadowBlur = 3;
+  ctx.shadowOffsetY = 2;
   ctx.fillStyle = '#172231';
   ctx.beginPath(); ctx.roundRect(-22, -13, 59, 14, 7); ctx.fill();
+  ctx.shadowBlur = ctx.shadowOffsetY = 0;
+  // Highlighted rubber tread and metal track casing.
+  ctx.strokeStyle = '#91a3b1';
+  ctx.lineWidth = .9;
+  ctx.beginPath(); ctx.roundRect(-22, -13, 59, 14, 7); ctx.stroke();
+  ctx.fillStyle = '#29394b';
+  ctx.beginPath(); ctx.roundRect(-21, -11, 57, 9, 5); ctx.fill();
   for (const wheel of [-11, 6, 25]) {
     oval(ctx, wheel, -6, 10, 8, '#172231');
     oval(ctx, wheel, -6, 6, 5, '#5a6979');
@@ -146,11 +156,26 @@ export function drawPlough(ctx, x, y, heap, texture, now) {
   ctx.beginPath(); ctx.roundRect(2, -38, 23, 20, 4); ctx.fill();
   ctx.fillStyle = '#344d65';
   ctx.beginPath(); ctx.roundRect(5, -35, 16, 12, 2); ctx.fill();
-  ctx.fillStyle = '#c0deeb'; ctx.fillRect(7, -34, 3, 9);
+  const glass = ctx.createLinearGradient(5, -35, 22, -23);
+  glass.addColorStop(0, '#d9f4ff');
+  glass.addColorStop(.45, '#8ec2dc');
+  glass.addColorStop(1, '#294a67');
+  ctx.fillStyle = glass;
+  ctx.beginPath(); ctx.roundRect(5, -35, 16, 12, 2); ctx.fill();
+  ctx.strokeStyle = '#e2b66a'; ctx.lineWidth = 1.1;
+  ctx.strokeRect(6, -34, 14, 10);
+  ctx.fillStyle = '#ffffffa8'; ctx.fillRect(8, -33, 2.2, 8);
+  ctx.fillStyle = '#c2e4f5aa'; ctx.fillRect(12, -33, 1, 6);
   ctx.fillStyle = '#784417';
   for (let i = 0; i < 4; i++) ctx.fillRect(-16 + i * 3, -20, 1.35, 5);
   ctx.fillStyle = '#fce8b1'; ctx.fillRect(-17, -12, 49, 1);
   ctx.fillStyle = '#b62c32'; ctx.fillRect(33, -20, 3, 4);
+  // Crisp machined trim, door seam, and front headlamp.
+  ctx.strokeStyle = '#fff1bf'; ctx.lineWidth = .7;
+  ctx.beginPath(); ctx.moveTo(3, -22); ctx.lineTo(3, -10); ctx.stroke();
+  ctx.fillStyle = '#fff8d0'; ctx.beginPath(); ctx.roundRect(-20, -20, 5, 4, 1); ctx.fill();
+  ctx.fillStyle = '#ad681b'; ctx.fillRect(23, -18, 11, 2);
+  ctx.fillStyle = '#f9e2a8'; ctx.fillRect(11, -41, 9, 1.3);
   const pulse = Math.max(0, Math.cos(now / 82)) ** 4;
   oval(ctx, 15, -40, 4, 2, '#e59226');
   if (pulse > .03) {
@@ -169,6 +194,8 @@ export function drawPlough(ctx, x, y, heap, texture, now) {
   ctx.lineTo(-37, -4); ctx.lineTo(-20, -8); ctx.fill();
   ctx.strokeStyle = '#c0ccd9'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(-33, -20); ctx.lineTo(-37, -3); ctx.lineTo(-25, -4); ctx.stroke();
+  ctx.strokeStyle = '#f0f6ffbb'; ctx.lineWidth = .8;
+  ctx.beginPath(); ctx.moveTo(-31, -18); ctx.lineTo(-35, -5); ctx.stroke();
   ctx.restore();
 }
 
