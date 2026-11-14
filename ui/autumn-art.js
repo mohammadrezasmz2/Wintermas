@@ -17,18 +17,27 @@ function rand(seed) {
   };
 }
 
+// Five broad, asymmetrical lobes attached to one long petiole. The previous
+// nine narrow radial points looked like a yellow sun rather than a real maple.
 function maple(ctx) {
-  ctx.moveTo(0, -45);
-  ctx.lineTo(8, -23); ctx.lineTo(22, -40); ctx.lineTo(22, -19);
-  ctx.lineTo(41, -23); ctx.lineTo(30, -8); ctx.lineTo(42, 2);
-  ctx.lineTo(26, 8); ctx.lineTo(32, 26); ctx.lineTo(14, 21);
-  ctx.lineTo(6, 34); ctx.lineTo(3, 27); ctx.lineTo(0, 43);
-  ctx.lineTo(-4, 27); ctx.lineTo(-12, 34); ctx.lineTo(-18, 21);
-  ctx.lineTo(-34, 24); ctx.lineTo(-26, 7); ctx.lineTo(-41, 0);
-  ctx.lineTo(-29, -9); ctx.lineTo(-39, -24); ctx.lineTo(-21, -18);
-  ctx.lineTo(-22, -39); ctx.lineTo(-8, -22);
+  ctx.moveTo(0, -44);
+  ctx.bezierCurveTo(7,-34,9,-25,10,-19);
+  ctx.bezierCurveTo(15,-25,21,-30,27,-31);
+  ctx.bezierCurveTo(26,-24,22,-17,19,-12);
+  ctx.bezierCurveTo(26,-13,33,-13,40,-9);
+  ctx.bezierCurveTo(35,-1,28,5,18,9);
+  ctx.bezierCurveTo(20,15,17,23,9,29);
+  ctx.bezierCurveTo(5,26,3,31,1,37);
+  ctx.bezierCurveTo(-3,32,-6,27,-9,24);
+  ctx.bezierCurveTo(-17,24,-19,16,-17,9);
+  ctx.bezierCurveTo(-26,6,-35,0,-38,-7);
+  ctx.bezierCurveTo(-34,-12,-27,-12,-20,-11);
+  ctx.bezierCurveTo(-24,-17,-27,-24,-25,-30);
+  ctx.bezierCurveTo(-19,-29,-14,-24,-9,-19);
+  ctx.bezierCurveTo(-9,-27,-5,-38,0,-44);
   ctx.closePath();
 }
+
 function oval(ctx) {
   ctx.moveTo(0,-45);
   ctx.bezierCurveTo(26,-40,37,-15,30,10);
@@ -61,7 +70,9 @@ export function createLeafSprites() {
     const rnd=rand(733+i*97);
     const shades=PALETTES[i%PALETTES.length];
     ctx.translate(SIZE/2,SIZE/2);
-    ctx.scale(1.02,1.02);
+    // A slight irregular lean breaks the identical radial silhouette.
+    ctx.rotate(Math.sin(i*3.31)*.055);
+    ctx.scale(i%4===0?.97:1.02,1.01);
     ctx.shadowColor='#35170f77'; ctx.shadowBlur=5;
     ctx.shadowOffsetX=1; ctx.shadowOffsetY=2;
     ctx.beginPath(); paths[i%3](ctx);
@@ -105,39 +116,68 @@ export function createLeafSprites() {
   }
   return sprites;
 }
-export function drawLeaf(ctx, sprite, x, y, size, angle, flip=0, alpha=1) {
+export function drawLeaf(ctx, sprite, x, y, size, angle, flip=0, alpha=1, squash=1) {
   if (!sprite || size<=0) return;
   ctx.save(); ctx.globalAlpha*=alpha;
   ctx.translate(x,y);ctx.rotate(angle);
-  ctx.scale(.36+.64*Math.abs(Math.cos(flip)),1);
-  const diameter=size*2.8;
+  ctx.scale(.36+.64*Math.abs(Math.cos(flip)),squash);
+  const diameter=size*2.55;
   ctx.drawImage(sprite,-diameter/2,-diameter/2,diameter,diameter);
   ctx.restore();
 }
 export function drawAutumnMound(ctx, sprites, x, y, load, now) {
-  if (load<2) return;
-  const fullness=Math.min(1,load/1800),length=19+76*Math.sqrt(fullness);
-  const peak=3+23*Math.sqrt(fullness);
-  ctx.save();ctx.translate(x,y);
-  const n=Math.round(8+fullness*50);
-  // Layered individual leaf sprites rather than a flat white snowbank.
-  for(let i=0;i<n;i++) {
-    const t=(i*.61803398875)%1;
-    const h=peak*Math.pow(Math.sin(Math.PI*t),.6);
-    const size=5+((i*7)%8);
-    const yy=-Math.max(2,h*(.4+(i%5)/8));
-    const xx=-39-t*length+Math.sin(i*12.3)*4;
-    drawLeaf(ctx,sprites[(i*7+3)%sprites.length],xx,
-      yy+Math.sin(now*.008+i*1.61)*.65,size,
-      i*.83+Math.sin(now*.005+i)*.16,0,1);
+  if (load < 2 || !sprites.length) return;
+  const fullness = Math.min(1, load / 1800);
+  const length = 18 + 78 * Math.sqrt(fullness);
+  const peak = 7 + 19 * Math.sqrt(fullness);
+  ctx.save();
+  ctx.translate(x, y);
+  // The right edge is at the actual blade contact (-36, -20 to 0).
+  // A continuous foundation closes the air gap above and below the blade.
+  ctx.beginPath();
+  ctx.moveTo(-35, 1);
+  ctx.lineTo(-35, -Math.min(23, 12 + peak * .46));
+  ctx.bezierCurveTo(-42, -peak - 2, -56, -peak - 2, -68, -peak * .82);
+  ctx.bezierCurveTo(-80 - length * .19, -peak * .6,
+    -34 - length * .78, -4, -36 - length, 1);
+  ctx.closePath();
+  const earth = ctx.createLinearGradient(0,-peak-5,0,3);
+  earth.addColorStop(0,'#d7a042');
+  earth.addColorStop(.32,'#b36b2e');
+  earth.addColorStop(.8,'#7a4224');
+  earth.addColorStop(1,'#4c2b1d');
+  ctx.fillStyle=earth;ctx.fill();
+  // Keep every individual leaf within the silhouette so the heap appears
+  // layered and solid, not a loose cloud of disconnected star-shaped icons.
+  ctx.save();
+  ctx.clip();
+  const count = 28 + Math.floor(fullness * 125);
+  for(let i=0;i<count;i++) {
+    const t = (i * .61803398875 + .13) % 1;
+    const h = peak * Math.pow(1-t,.55);
+    const px = -38 - t*length + Math.sin(i*4.19)*3;
+    const py = -1 - h*(.12 + ((i*11)%17)/18);
+    const size = 3.0 + ((i*7)%9)*.31;
+    drawLeaf(ctx,sprites[(i*7+4)%sprites.length],px,
+      py + Math.sin(now*.008+i*.6)*.35,size,
+      i*.65 + Math.sin(i*2.1)*.24,i*.15,.88,.64);
   }
-  // A few leaves peel away from the moving pile at its tip.
-  for(let i=0;i<9;i++) {
-    const t=(now*.00032+i/9)%1;
-    const x=-39-length*.3-t*28;
-    const y=-peak-5-Math.sin(Math.PI*t)*9;
-    drawLeaf(ctx,sprites[(i*5)%sprites.length],x,y,
-      3+(i%3),t*6.28+i,t*3.6,(1-t)*.8);
+  ctx.restore();
+  // Small leaf tufts at the crest tie the textured heap to the blade.
+  for(let i=0;i<12;i++) {
+    const t=i/11;
+    const px=-37-t*length*.8;
+    const py=-Math.max(3, peak*(1-t*.8))+
+      Math.sin(now*.005+i*2.1)*.55;
+    drawLeaf(ctx,sprites[(i*5+2)%sprites.length],px,py,
+      3.0+(i%4)*.7,.3+i*1.17,0,.94,.64);
+  }
+  // A handful of detached small leaves fly in front of the working blade.
+  for(let i=0;i<7;i++) {
+    const t=(now*.00031+i/7)%1;
+    drawLeaf(ctx,sprites[(i*5)%sprites.length],
+      -43-t*(length*.52),-peak-2-Math.sin(Math.PI*t)*7,
+      2.8+(i%3)*.45,t*4.8+i,t*3.6,(1-t)*fullness*.7,.76);
   }
   ctx.restore();
 }

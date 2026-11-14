@@ -44,3 +44,42 @@ export function pileLayer(items,offset) {
   for(const p of items) if(Math.abs(p.offset-offset)<18) near++;
   return Math.min(7,Math.floor(near/4));
 }
+
+// A falling leaf tends to slide a few pixels into a nearby loose cluster.
+// Limit this movement to avoid conspicuous jumps after window drags.
+export function settledLeafOffset(items, offset, span, randomValue=.5) {
+  const clamp = n => Math.max(0, Math.min(Math.max(0,span-1), n));
+  let sum=0, weight=0;
+  for(let i=items.length-1;i>=0;i--) {
+    const distance=Math.abs(items[i].offset-offset);
+    if(distance>=27)continue;
+    const w=1-distance/27;
+    sum+=items[i].offset*w;
+    weight+=w;
+  }
+  const center=weight>1.1?offset*.67+(sum/weight)*.33:offset;
+  return clamp(center+(Math.max(0,Math.min(1,randomValue))-.5)*11);
+}
+
+// Heightfield for an irregular pile: sparse areas taper to nothing while
+// dense clusters build rounded ridges. A linear row never becomes a solid bar.
+export function leafPileProfile(items, width, step=9) {
+  const bins = new Float32Array(Math.max(2,Math.ceil(width/step)+1));
+  for(const item of items) {
+    const position=Math.max(0,Math.min(bins.length-1.001,item.offset/step));
+    const i=Math.floor(position),blend=position-i;
+    bins[i]+=1-blend;
+    if(i+1<bins.length)bins[i+1]+=blend;
+  }
+  const heights=new Float32Array(bins.length);
+  for(let i=0;i<bins.length;i++) {
+    const density=(bins[i]??0)*.42+
+      (bins[i-1]??0)*.23+(bins[i+1]??0)*.23+
+      (bins[i-2]??0)*.06+(bins[i+2]??0)*.06;
+    const height=Math.max(0,density*3.5-1.2);
+    const waviness=.86+.14*Math.cos(i*1.67);
+    const edge=Math.min(1,(i+.15)*.65,(bins.length-i-.15)*.65);
+    heights[i]=Math.min(22,height*waviness*Math.max(0,edge));
+  }
+  return {step,heights};
+}

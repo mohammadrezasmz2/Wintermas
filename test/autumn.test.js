@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { advanceLeaf, pointerImpulse, sweepLeafItems, pileLayer } from '../ui/autumn-physics.js';
+import { advanceLeaf, pointerImpulse, sweepLeafItems, pileLayer, settledLeafOffset, leafPileProfile } from '../ui/autumn-physics.js';
 
 function leaf() {
   return { x: 100, y: 100, vx: 0, vy: 30, size: 12, phase: 1.4,
@@ -35,4 +35,31 @@ test('local leaf piles stack irregularly rather than creating straight lines', (
   const items=Array.from({length:32},(_,i)=>({offset:100+i%7,size:10}));
   assert.equal(pileLayer(items,103),7);
   assert.equal(pileLayer(items,490),0);
+});
+
+test('settled leaves slide into nearby clusters but do not teleport', () => {
+  const items=[{offset:100},{offset:105},{offset:98},{offset:103}];
+  const next=settledLeafOffset(items,115,500,.5);
+  assert.ok(next>90 && next<115);
+  const isolated=settledLeafOffset(items,300,500,.5);
+  assert.equal(isolated,300);
+});
+
+test('dense leaf clusters form isolated organic mounds, not a full-width strip', () => {
+  const leaves=[
+    ...Array.from({length:28},(_,i)=>({offset:74+(i%7)-3})),
+    ...Array.from({length:10},(_,i)=>({offset:273+(i%5)-2})),
+  ];
+  const {step,heights}=leafPileProfile(leaves,400);
+  const at=x=>heights[Math.floor(x/step)];
+  assert.ok(at(74)>at(273), 'more leaves produce a taller local mound');
+  assert.ok(at(74)>10);
+  assert.ok(at(200)<1,'empty middle of the window remains clear');
+  assert.ok(at(0)<1 && at(395)<1,'pile tapers to nothing at edges');
+  assert.ok([...heights].every(h=>h>=0&&h<=22));
+});
+
+test('a sparse isolated leaf cannot create a long straight snowbank', () => {
+  const {heights}=leafPileProfile([{offset:100}],300);
+  assert.ok([...heights].filter(h=>h>1.1).length<=2);
 });

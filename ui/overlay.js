@@ -1071,8 +1071,9 @@ function paintSnowProps(now) {
     // a dark strip between the accumulated snow and the ground.
     const surfaceY = bottomSurfaceAt(x).top + 1;
     if (settings.weather === 'autumn') {
-      drawPlough(ctx, plough.x, surfaceY, 0, snowGrain, now);
+      // Continuous leaf mound touches the leading blade, which masks the seam.
       autumn.drawMound(ctx, plough.x, surfaceY, plough.load, now);
+      drawPlough(ctx, plough.x, surfaceY, 0, snowGrain, now);
     } else drawPlough(ctx, plough.x, surfaceY, plough.load, snowGrain, now);
   }
 }

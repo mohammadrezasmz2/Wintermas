@@ -47,7 +47,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: v0.2.1-preview.10
+          RELEASE_TAG: v0.2.1-preview.11
         run: |
-          gh release create $env:RELEASE_TAG 'dist/setup/Wintermas-Setup.exe' --target $env:GITHUB_SHA --title 'Wintermas 0.2.1 Preview 10' --prerelease --notes 'Preview 10: independent adjustable snow diameter (2-12 px); uniform-size falling flakes and fine powder released from moved or minimized windows; no oversized snow clumps. Windows testing recommended before stable release.'
+          gh release create $env:RELEASE_TAG 'dist/setup/Wintermas-Setup.exe' --target $env:GITHUB_SHA --title 'Wintermas 0.2.1 Preview 11' --prerelease --notes 'Preview 11: natural five-lobed maple silhouette, rounded local-density foliage piles and a leaf mound attached to the snowplough blade. Windows testing recommended before stable release.'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

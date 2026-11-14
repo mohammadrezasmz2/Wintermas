@@ -3,7 +3,8 @@
 import { landing, bottomTaskbarAt } from './geometry.js';
 import { clipPrecipitation } from './precipitation-mask.js';
 import { createLeafSprites, drawLeaf, drawAutumnMound } from './autumn-art.js';
-import { advanceLeaf, pointerImpulse, sweepLeafItems, pileLayer } from './autumn-physics.js';
+import { advanceLeaf, pointerImpulse, sweepLeafItems, pileLayer,
+  settledLeafOffset, leafPileProfile } from './autumn-physics.js';
 
 const random=(min,max)=>min+Math.random()*(max-min);
 const MAX_LEAVES=320, MAX_PILE=460;
@@ -43,12 +44,12 @@ export function createAutumn() {
     const pile=makePile(rect);
     // Replace only the oldest settled leaf if pile budget is exhausted.
     if(pile.items.length>=MAX_PILE) pile.items.shift();
-    const offset=Math.max(0,Math.min(rect.right-rect.left-1,x-rect.left));
+    const offset=settledLeafOffset(pile.items,x-rect.left,rect.right-rect.left,Math.random());
     pile.items.push({
-      offset,size:leaf.size*random(.74,1.05),variant:leaf.variant,
-      angle:leaf.angle+random(-.35,.35),
+      offset,size:leaf.size*random(.62,.92),variant:leaf.variant,
+      angle:random(-2.4,2.4),
       layer:pileLayer(pile.items,offset),
-      flip:random(-.6,.6),
+      flip:random(-.55,.55),
     });
   }
   function clear() {
@@ -74,7 +75,7 @@ export function createAutumn() {
           // Real leaf shower: each leaf falls separately from last visible rim.
           for(const item of pile.items) {
             if(falling.length>=MAX_LEAVES) break;
-            const leaf=makeLeaf(pile.rect.top-12-item.layer*4);
+            const leaf=makeLeaf(pile.rect.top-12-item.layer*2.1);
             leaf.x=pile.rect.left+item.offset;
             leaf.variant=item.variant;leaf.size=item.size;
             leaf.vx=random(-100,100);leaf.vy=random(-90,-15);
@@ -90,7 +91,7 @@ export function createAutumn() {
         for(let i=pile.items.length-1;i>=0;i--) {
           if(Math.random()>.34||falling.length>=MAX_LEAVES) continue;
           const item=pile.items.splice(i,1)[0];
-          const leaf=makeLeaf(Math.min(pile.rect.top,nextRect.top)-10-item.layer*4);
+          const leaf=makeLeaf(Math.min(pile.rect.top,nextRect.top)-10-item.layer*2.1);
           leaf.x=nextRect.left+item.offset;
           leaf.size=item.size;leaf.variant=item.variant;
           leaf.vx=random(-90,90)-dx*1.8;leaf.vy=random(-110,-35);
@@ -123,11 +124,11 @@ export function createAutumn() {
       if(vertical>78||next.x<rect.left-85||next.x>rect.right+85) continue;
       for(let i=pile.items.length-1;i>=0&&lofted<22;i--) {
         const item=pile.items[i],x=rect.left+item.offset;
-        const distance=Math.hypot(x-next.x,rect.top-item.layer*4-next.y);
+        const distance=Math.hypot(x-next.x,rect.top-item.layer*2.1-next.y);
         if(distance>95||Math.random()>.52) continue;
         pile.items.splice(i,1);
         if(falling.length>=MAX_LEAVES) continue;
-        const leaf=makeLeaf(rect.top-5-item.layer*4);
+        const leaf=makeLeaf(rect.top-5-item.layer*2.1);
         leaf.x=x;
         leaf.variant=item.variant;leaf.size=item.size;
         leaf.angle=item.angle;
@@ -177,29 +178,61 @@ export function createAutumn() {
   }
   function drawPile(ctx,pile,covers,now) {
     if(!pile.items.length) return;
-    const rect=pile.rect;
+    const rect=pile.rect,span=rect.right-rect.left;
+    if(span<=0) return;
     ctx.save();
-    // The lower half of a grounded leaf must never enter the app window/taskbar.
+    // No leaf textures are ever painted into window or taskbar content.
     ctx.beginPath();
     ctx.rect(-120,-120,width+240,Math.max(0,rect.top+120));
     ctx.clip();
     for(const cover of covers) {
       if(cover.right<=rect.left||cover.left>=rect.right||
-        cover.bottom<=rect.top-43||cover.top>=rect.top+1) continue;
+        cover.bottom<=rect.top-45||cover.top>=rect.top+1) continue;
       ctx.beginPath();
       ctx.rect(-120,-120,width+240,height+240);
       ctx.rect(cover.left,cover.top,cover.right-cover.left,cover.bottom-cover.top);
       ctx.clip('evenodd');
     }
+
+    const {step,heights}=leafPileProfile(pile.items,span);
+    let crest=0;
+    for(const h of heights) crest=Math.max(crest,h);
+    if(crest>1.1) {
+      // Density-based, tapered irregular foundation: no uniform flat stripe.
+      ctx.beginPath();
+      ctx.moveTo(rect.left,rect.top+1);
+      ctx.lineTo(rect.left,rect.top-heights[0]);
+      for(let i=1;i<heights.length;i++) {
+        const prev=rect.left+Math.min(span,(i-1)*step);
+        const x=rect.left+Math.min(span,i*step);
+        ctx.quadraticCurveTo((prev+x)*.5,rect.top-heights[i-1],
+          x,rect.top-heights[i]);
+      }
+      ctx.lineTo(rect.right,rect.top+1);
+      ctx.closePath();
+      const fill=ctx.createLinearGradient(0,rect.top-crest-2,0,rect.top+2);
+      fill.addColorStop(0,'#d4a04e');
+      fill.addColorStop(.38,'#a96a32');
+      fill.addColorStop(.72,'#754325');
+      fill.addColorStop(1,'#3d291f');
+      ctx.fillStyle=fill;
+      ctx.fill();
+    }
     const atlas=spritesReady();
-    for(let i=0;i<pile.items.length;i++) {
-      const item=pile.items[i];
-      const x=rect.left+item.offset,y=rect.top-3-item.layer*3.4;
-      if(x<-40||x>width+40)continue;
-      drawLeaf(ctx,atlas[item.variant],x,y,item.size*.68,item.angle,item.flip,.96);
+    // Small, flattened, overlapping leaves: visually stacked on the foundation.
+    for(const item of pile.items) {
+      const x=rect.left+item.offset;
+      if(x<-32||x>width+32)continue;
+      const bin=Math.max(0,Math.min(heights.length-1,Math.floor(item.offset/step)));
+      const rise=Math.min(heights[bin]+3,2+(item.layer??0)*2.05);
+      const y=rect.top-1-rise;
+      const size=item.size*(.43+.045*Math.min(5,item.layer??0));
+      drawLeaf(ctx,atlas[item.variant],x,y,size,item.angle,item.flip,
+        .79+Math.min(.18,(item.layer??0)*.025),.59);
     }
     ctx.restore();
   }
+
   function paint(ctx,now) {
     const atlas=spritesReady();
     ctx.save();
