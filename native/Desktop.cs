@@ -31,6 +31,8 @@ static class Desktop {
     [DllImport("user32")] static extern bool SetProcessDpiAwarenessContext(IntPtr context);
     [DllImport("dwmapi")] static extern int DwmGetWindowAttribute(IntPtr hwnd, int key, out Rect rect, int size);
     [DllImport("dwmapi")] static extern int DwmGetWindowAttribute(IntPtr hwnd, int key, out int value, int size);
+    [DllImport("winmm")] static extern uint timeBeginPeriod(uint period);
+    [DllImport("winmm")] static extern uint timeEndPeriod(uint period);
 
     static bool IsApplicationSurface(IntPtr hwnd) {
         int extended = GetWindowLong(hwnd, GwlExStyle);
@@ -51,6 +53,7 @@ static class Desktop {
         string last = null;
         Point lastCursor = new Point();
         int lastSent = 0;
+        bool fineTimer = false;
         while (true) {
             var windows = new List<string>();
             EnumWindows(delegate(IntPtr hwnd, IntPtr ignored) {
@@ -88,7 +91,13 @@ static class Desktop {
                 lastCursor = cursor;
                 lastSent = now;
             }
-            Thread.Sleep(pressed || moved ? 14 : 30);
+            // While a window is dragged, sample at ~120 Hz with a 1 ms timer so snow follows it smoothly;
+            // the default 15.6 ms Windows timer would turn 8 ms sleeps into uneven 15-16 ms steps.
+            if (pressed != fineTimer) {
+                if (pressed) timeBeginPeriod(1); else timeEndPeriod(1);
+                fineTimer = pressed;
+            }
+            Thread.Sleep(pressed ? 8 : moved ? 14 : 30);
         }
     }
 }

@@ -102,4 +102,37 @@ body.open main>:not(fieldset),body.open #options>*{animation:rise .55s var(--eas
 ::-webkit-scrollbar-thumb{background:#ffffff2e;border-radius:6px}
 ::-webkit-scrollbar-thumb:hover{background:#ffffff4a}
 :focus-visible{outline:2px solid var(--gold);outline-offset:2px}
-@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}/* ---- v0.2: weather selector ---- */
+.weather{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:3px;margin:4px 0 3px;border-radius:10px;background:#0000002b;border:1px solid var(--line)}
+.weather-option{position:relative;display:flex;align-items:center;justify-content:center;gap:6px;height:27px;border-radius:7px;font-size:12px;color:var(--muted);cursor:pointer;transition:background .3s,color .3s,box-shadow .3s}
+.weather-option input{position:absolute;opacity:0;width:1px;height:1px;margin:0;pointer-events:none}
+.weather-option .ico{width:14px;height:14px}
+.weather-option:hover{color:#f4faf6}
+.weather-option:has(input:checked){background:var(--surface-2);color:#f4faf6;box-shadow:0 1px 6px #0004,inset 0 0 0 1px #ffffff1a}
+.weather-option:has(input:focus-visible){outline:2px solid var(--gold);outline-offset:1px}
+fieldset:disabled .weather-option{cursor:default}
+/* ---- v0.2: rain theme (applied when Weather = Rain) ---- */
+body.theme-rain{--muted:#a3b4c6;--gold:#a9cbf0;--mint:#a8d4ff;--line:#c7dcf51f}
+body.theme-rain .widget{background:linear-gradient(180deg,#16212d,#0d151e) padding-box,linear-gradient(165deg,#cfe2f875,#b8cfe618 40%,#a9cbf040) border-box}
+body.theme-rain .widget::before{background:repeating-linear-gradient(104deg,transparent 0 17px,#c6dcf50b 17px 18px),radial-gradient(ellipse 85% 55% at 50% -8%,#2d4a66aa,transparent 72%)}
+body.theme-rain .widget::after{background:radial-gradient(ellipse 70% 45% at 50% -5%,#7fb6ee55,transparent 70%)}
+body.theme-rain .master{background:linear-gradient(105deg,#203247,#182638);border-color:#acc8e630}
+body.theme-rain.enabled .master{border-color:#a8d4ff66;box-shadow:0 0 0 3px #9cc8f514,0 6px 20px #4f8fd022;background:linear-gradient(105deg,#28415c,#1d3048)}
+body.theme-rain.enabled .indicator{background:#a6cff7;box-shadow:0 0 8px 1px #86b8ea}
+body.theme-rain.enabled #toggle img{filter:drop-shadow(0 0 8px #9cc8f566)}
+body.theme-rain .switch input{background:#34445a}
+body.theme-rain .switch input:checked{background:linear-gradient(90deg,#3f74ad,#5a98d6);border-color:#9cc8f555;box-shadow:0 0 10px #5a98d644}
+body.theme-rain output{background:#a8d4ff1a}
+body.theme-rain h2::after{background:linear-gradient(90deg,#a9cbf033,transparent)}
+body.theme-rain .actions button:not(:disabled):hover{background:#b9d6f01f;border-color:#a8d4ff4a;box-shadow:0 4px 12px #0a152155}
+body.theme-rain .palette select,body.theme-rain .palette option{background:#1e2f42}
+body.theme-rain .palette select:hover{background:#25394f;border-color:#a8d4ff4a}
+body.theme-rain .hint{border-left-color:#a9cbf044}
+body.theme-rain #hide-widget:hover{background:#b9d6f01f;border-color:#a8d4ff40}
+body.theme-rain .ripple{background:#d7e8f736}
+body.theme-rain .slider input:hover::-webkit-slider-thumb{box-shadow:0 1px 4px #0009,0 0 0 5px #a8d4ff30}
+body.theme-rain .slider input:active::-webkit-slider-thumb{box-shadow:0 1px 4px #0009,0 0 0 7px #a8d4ff3a}
+/* ---- v0.2: flyout above the tray icon ---- */
+body.flyout header{-webkit-app-region:no-drag}
+body.flyout .handle{display:none}
+body.flyout #toggle{pointer-events:none}

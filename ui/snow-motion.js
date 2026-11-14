@@ -14,3 +14,21 @@ export function snowStep(phase, rate, sway, fall, wind, dt) {
     vy: fall * (1 + 0.12 * Math.sin(1.3 * nextPhase)),
   };
 }
+
+// Same motion as snowStep, written into the flake to avoid one allocation per flake per frame.
+export function snowStepInPlace(p, wind, dt) {
+  const phase = p.phase, rate = p.rate, sway = p.sway, fall = p.fall;
+  const nextPhase = phase + rate * dt;
+  const dx = wind * dt + sway / rate * (
+    Math.sin(nextPhase) - Math.sin(phase) +
+    0.3 / 2.3 * (Math.sin(2.3 * nextPhase) - Math.sin(2.3 * phase))
+  );
+  const dy = fall * (dt + 0.12 / (1.3 * rate) * (
+    Math.cos(1.3 * phase) - Math.cos(1.3 * nextPhase)
+  ));
+  p.phase = nextPhase;
+  p.x += dx;
+  p.y += dy;
+  p.swayVelocity = wind + sway * (Math.cos(nextPhase) + 0.3 * Math.cos(2.3 * nextPhase));
+  p.vy = fall * (1 + 0.12 * Math.sin(1.3 * nextPhase));
+}

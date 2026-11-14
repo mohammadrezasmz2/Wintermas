@@ -101,11 +101,9 @@ function show(settings) {
   }
 }
 const update = patch => wintermas.update(patch).catch(report);
-toggle.addEventListener('click', () => setOpen(menu.hidden));
 id('hide-widget').addEventListener('click', async () => {
   if (transitioning) return;
   try {
-    await setOpen(false);
     transitioning = true;
     if (motion.matches) await wintermas.hideWidget();
     else {
@@ -120,7 +118,7 @@ id('hide-widget').addEventListener('click', async () => {
   finally { transitioning = false; }
 });
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && !menu.hidden) { setOpen(false); toggle.focus(); }
+  if (event.key === 'Escape') wintermas.hideWidget().catch(report);
 });
 id('enabled').addEventListener('change', () => update({ enabled: id('enabled').checked }));
 id('snow').addEventListener('change', () => update({ paused: !id('snow').checked }));
@@ -134,7 +132,7 @@ for (const button of document.querySelectorAll('[data-action]')) {
     try {
       const action = button.dataset.action;
       if (action === 'garland' || action === 'tree') {
-        await setOpen(false);
+        await wintermas.hideWidget();
         await wintermas.action(action, id('lights').value);
       } else await wintermas.action(action);
     } catch (error) { report(error); }
@@ -154,3 +152,22 @@ id('light-color').addEventListener('change', () => {
 });
 wintermas.onSettings(show);
 wintermas.settings().then(show).catch(report);
+/* ---- v0.2: weather selector (snow / rain) ---- */
+function showWeather(settings) {
+  const weather = settings.weather === 'rain' ? 'rain' : 'snow';
+  document.body.classList.toggle('theme-rain', weather === 'rain');
+  for (const input of document.querySelectorAll('input[name=weather]')) input.checked = input.value === weather;
+  id('fall-label').textContent = weather === 'rain' ? 'Rainfall' : 'Snowfall';
+}
+for (const input of document.querySelectorAll('input[name=weather]')) {
+  input.addEventListener('change', () => { if (input.checked) update({ weather: input.value }); });
+}
+wintermas.onSettings(showWeather);
+wintermas.settings().then(showWeather).catch(report);
+
+/* ---- v0.2: flyout above the tray icon (always expanded, closes when it loses focus) ---- */
+document.body.classList.add('flyout');
+// The color dialog takes focus from the flyout; keep it open until the dialog is closed.
+id('light-color').addEventListener('click', () => wintermas.pinWidget?.(true));
+addEventListener('focus', () => wintermas.pinWidget?.(false));
+setOpen(true);

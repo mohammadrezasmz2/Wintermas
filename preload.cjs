@@ -10,5 +10,7 @@ contextBridge.exposeInMainWorld('wintermas', {
   action: (action, color) => ipcRenderer.invoke('effect:action', action, color),
   widget: (open, contentHeight) => ipcRenderer.invoke('widget:open', open, contentHeight),
   hideWidget: () => ipcRenderer.invoke('widget:hide'),
+  log: entry => ipcRenderer.send('diag:log', entry),
+  pinWidget: pinned => ipcRenderer.send('widget:pin', pinned),
 });
 

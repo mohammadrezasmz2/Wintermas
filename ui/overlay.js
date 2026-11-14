@@ -1,10 +1,13 @@
 import { landing, bottomTaskbarAt } from './geometry.js';
-import { snowStep } from './snow-motion.js';
+import { snowStep, snowStepInPlace } from './snow-motion.js';
 import { resizeProfile } from './snow-profile.js';
 import { drawPlough, drawSanta, drawSnowman, drawBall, makeSnowGrain } from './snow-art.js';
 import { drawGarland, drawTree, drawGift } from './christmas-decor.js';
 import { createSnowRenderer } from './snow-renderer.js';
 import { makeRope, brushRope, stepRope } from './garland-physics.js';
+import { createRain } from './rain.js';
+import { createFramePacer } from './frame-pacing.js';
+import { createPerfMonitor } from './perf-monitor.js';
 
 const canvas = document.querySelector('canvas');
 const ctx = canvas.getContext('2d');
@@ -36,6 +39,63 @@ const garlands = [], trees = [];
 let gifts = [];
 const piles = new Map();
 
+// ---- v0.2: smooth pacing, dirty redraws, rain weather, diagnostics ----
+const rain = createRain(document.querySelector('#rain'));
+let sceneDirty = false;
+const diagnostics = entry => window.wintermas?.log?.(entry);
+const pacer = createFramePacer(frame, {
+  onModeChange: mode => diagnostics({ type: 'pacing', mode }),
+});
+const perf = createPerfMonitor(diagnostics, () => ({
+  pacing: pacer.mode, refreshMs: +pacer.refreshMs.toFixed(2),
+  snow: document.documentElement.dataset.snowBackend, rain: rain.stats(),
+  weather: settings.weather ?? 'snow', flakes: particles.length, piles: piles.size,
+  windows: rectangles.length, width, height, dpr: devicePixelRatio,
+}));
+
+function geometryChanged(before, after) {
+  if (before.length !== after.length) return true;
+  for (let i = 0; i < before.length; i++) {
+    const a = before[i], b = after[i];
+    if (a.id !== b.id || a.left !== b.left || a.top !== b.top || a.right !== b.right || a.bottom !== b.bottom) return true;
+  }
+  return false;
+}
+
+// Redraw a scene with no moving parts only as often as its content can change:
+// pile rasters refresh every 90 ms, decoration lights twinkle and need ~30 fps.
+function staticSceneInterval() {
+  return garlands.length || trees.length || placement ? 32 : 90;
+}
+
+function applyWeather(before, next) {
+  if ((before.weather ?? 'snow') === (next.weather ?? 'snow')) return;
+  snowReady = false;
+  sceneDirty = true;
+}
+
+function meltSnow(dt) {
+  if (settings.weather !== 'rain' || settings.paused || settings.intensity <= 0) return;
+  const amount = dt * (0.3 + settings.intensity / 100 * 1.05);
+  for (const [id, pile] of [['ground', ground], ...piles]) {
+    const { profile } = pile;
+    let remaining = false;
+    for (let i = 0; i < profile.length; i++) {
+      if (profile[i] <= 0) continue;
+      profile[i] -= amount * (0.6 + profile[i] / 24);
+      if (profile[i] < 0.05) profile[i] = 0;
+      else remaining = true;
+    }
+    if (!remaining && pile !== ground) piles.delete(id);
+  }
+}
+
+function updateWeather(dt) {
+  meltSnow(dt);
+  rain.update(dt, settings, rectangles);
+  rain.draw(rectangles, settings.taskbar);
+}
+
 function resize() {
   const detailBudget = snowRenderer ? 1_050_000 : 760_000;
   const scale = Math.min(devicePixelRatio, Math.sqrt(detailBudget / (innerWidth * innerHeight)));
@@ -47,6 +107,8 @@ function resize() {
   canvas.height = Math.round(height * scale);
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
   snowRenderer?.resize(width, height, Math.min(devicePixelRatio, Math.sqrt(1_100_000 / (width * height))));
+  rain.resize(width, height, Math.min(devicePixelRatio, Math.sqrt(1_100_000 / (width * height))));
+  sceneDirty = true;
   const rect = { id: 'ground', left: 0, right: width, top: height, bottom: height + 1 };
   ground = { rect, profile: new Float32Array(Math.ceil(width / column)), kind: 'snow' };
   snowReady = false;
@@ -73,6 +135,7 @@ function desktop(frame) {
   const now = performance.now();
   const elapsed = Math.max(0.012, (now - (lastDesktopSample ?? now)) / 1000);
   lastDesktopSample = now;
+  if (placement || geometryChanged(rectangles, frame.rectangles)) sceneDirty = true;
   rectangles = frame.rectangles;
   taskbars = rectangles.filter(rect => rect.taskbar);
   updatePointer(frame.mouse, elapsed);
@@ -117,6 +180,7 @@ function desktop(frame) {
 
 function configure(next) {
   const wasEnabled = settings.enabled;
+  applyWeather(settings, next);
   if ((!next.taskbar || next.paused) && settings.taskbar && !settings.paused) {
     for (const [id, pile] of piles) {
       if (pile.rect.taskbar) piles.delete(id);
@@ -133,6 +197,8 @@ function configure(next) {
     frameRequest = setTimeout(frame, 0);
   } else if (!next.enabled && wasEnabled) {
     clearTimeout(frameRequest);
+    pacer.cancel();
+    rain.clear();
     cancelPlacement();
     grabbed = heldTree = undefined;
     ctx.clearRect(0, 0, width, height);
@@ -170,7 +236,7 @@ function spawnFlake() {
 
 function updateParticles(dt) {
   const budget = snowRenderer ? 950 : 360;
-  if (!settings.paused && settings.intensity > 0) {
+  if (!settings.paused && settings.intensity > 0 && settings.weather !== 'rain') {
     if (!snowReady) {
       snowReady = true;
       const count = Math.min(Math.floor(budget * .65), Math.round(width * height / 3200 * settings.intensity / 100));
@@ -188,24 +254,23 @@ function updateParticles(dt) {
   }
   const byId = new Map(rectangles.map(rect => [rect.id, rect]));
   const wind = settings.wind * 0.62;
-  particles = particles.filter(p => {
+  // In-place compaction: same rules as before, without a new array and motion object every frame.
+  let kept = 0;
+  for (let index = 0; index < particles.length; index++) {
+    const p = particles[index];
     const x0 = p.x, y0 = p.y;
-    const motion = snowStep(p.phase, p.rate, p.sway, p.fall, wind + p.vx, dt);
-    p.phase = motion.phase;
-    p.x += motion.dx;
-    p.y += motion.dy;
-    p.swayVelocity = motion.vx;
-    p.vy = motion.vy;
+    snowStepInPlace(p, wind + p.vx, dt);
     const hit = p.foreground ? null : landing(rectangles, x0, y0, p.x, p.y, settings.taskbar);
-    if (hit) { addPile(hit); return false; }
+    if (hit) { addPile(hit); continue; }
     if (y0 <= height && p.y >= height) {
       addPile({ rect: ground.rect, x: p.x }, 1.25);
-      return false;
+      continue;
     }
     if (p.x < -24) p.x = width + 23;
     else if (p.x > width + 24) p.x = -23;
-    return p.y < height + 28;
-  });
+    if (p.y < height + 28) particles[kept++] = p;
+  }
+  particles.length = kept;
   const trail = [];
   accents = accents.filter(p => {
     if (p.kind === 'santa') {
@@ -773,12 +838,13 @@ function paintSnowFallback() {
   ctx.globalAlpha = 1;
 }
 
-function frame() {
-  const now = performance.now();
+function frame(timestamp) {
+  // Vsync timestamps can sit slightly before a timer-driven frame; never let time run backwards.
+  const now = Math.max(typeof timestamp === 'number' ? timestamp : performance.now(), previous ?? -Infinity);
   const interval = 1000 / 60;
   if (settings.paused && !particles.length && !accents.length && !balls.length && !gifts.length &&
       !placement && !plough && !garlands.length && !trees.length && !piles.size &&
-      !ground.profile.some(Boolean)) {
+      !ground.profile.some(Boolean) && !rain.active()) {
     // Clear the last animation frame once, then avoid sending empty frames to DWM.
     if (previous !== undefined || !document.documentElement.dataset.rendered) {
       ctx.clearRect(0, 0, width, height);
@@ -796,18 +862,23 @@ function frame() {
     ? now + interval : nextFrame + interval;
   const dt = Math.min(0.045, (now - (previous ?? now)) / 1000);
   previous = now;
+  perf.record(now);
   updateParticles(dt);
   snowRenderer?.draw(particles, rectangles, settings.taskbar);
+  updateWeather(dt);
   const sceneNeeded = !snowRenderer && particles.length || accents.length || balls.length ||
     gifts.length || placement || plough || garlands.length || trees.length || piles.size ||
-    ground.profile.some(Boolean);
+    ground.profile.some(Boolean) || rain.needsScene();
   const fastScene = !snowRenderer && particles.length || grabbed || heldTree || plough ||
     accents.length || balls.some(ball => !ball.support || Math.abs(ball.vx) > 1) ||
     gifts.some(gift => !gift.support) || garlands.some(garland => garland.rope.active > 0) ||
-    trees.some(tree => Math.abs(tree.tilt ?? 0) > .003 || Math.abs(tree.velocity ?? 0) > .02);
-  if (sceneNeeded && (fastScene || previousScene === undefined || now - previousScene >= 32)) {
+    trees.some(tree => Math.abs(tree.tilt ?? 0) > .003 || Math.abs(tree.velocity ?? 0) > .02) ||
+    rain.fast();
+  if (sceneNeeded && (fastScene || sceneDirty || previousScene === undefined ||
+      now - previousScene >= staticSceneInterval())) {
     const sceneDt = Math.min(.08, (now - (previousScene ?? now)) / 1000);
     previousScene = now;
+    sceneDirty = false;
     drawScene(now, sceneDt);
     sceneVisible = true;
   } else if (!sceneNeeded && sceneVisible) {
@@ -816,7 +887,7 @@ function frame() {
     previousScene = undefined;
   }
   if (!document.documentElement.dataset.rendered) document.documentElement.dataset.rendered = 'true';
-  frameRequest = setTimeout(frame, Math.max(0, nextFrame - performance.now()));
+  pacer.schedule(nextFrame);
 }
 
 function drawScene(now, dt) {
@@ -832,6 +903,7 @@ function drawScene(now, dt) {
     }
   }
   paintPiles(now);
+  rain.paint(ctx, rectangles);
   if (!snowRenderer && particles.length) paintSnowFallback();
   for (const p of accents) paintParticle(p, now);
   paintSnowProps(now);

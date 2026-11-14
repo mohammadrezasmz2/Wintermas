@@ -1,12 +1,13 @@
-import { app, BrowserWindow, Menu, Tray, nativeImage, screen, ipcMain, powerMonitor, globalShortcut } from 'electron';
+import { app, BrowserWindow, Menu, Tray, nativeImage, screen, ipcMain, powerMonitor, globalShortcut, shell } from 'electron';
+import { createDiagnostics } from './diagnostics.js';
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 
-const defaults = { enabled: false, intensity: 65, wind: 15, taskbar: true, paused: true, startup: false };
+const defaults = { enabled: false, intensity: 65, wind: 15, taskbar: true, paused: true, startup: false, weather: 'snow' };
 const collapsed = { width: 96, height: 54 };
-const expanded = { width: 342, height: 590 };
+const expanded = { width: 342, height: 690 };
 const appPath = app.getAppPath();
 const native = join(appPath.endsWith('.asar') ? process.resourcesPath : appPath, 'native', 'desktop.exe');
 
@@ -17,6 +18,11 @@ let quitting = false, locked = false, tracking = false;
 let save = Promise.resolve();
 const overlays = new Map();
 const packagedEntry = process.defaultApp ? [app.getAppPath(), '--quiet'] : ['--quiet'];
+const weathers = ['snow', 'rain'];
+let displayCache;
+const diagnostics = createDiagnostics(app);
+// Chromium may treat a click-through overlay as occluded and pause its frames; keep it rendering.
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 
 function send(win, channel, value) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, value);
@@ -28,44 +34,80 @@ function trayMenu() {
     { label: settings.enabled ? 'Turn Christmas mode off' : 'Turn Christmas mode on', click: () => {
       update({ enabled: !settings.enabled }).catch(console.error);
     } },
-    { label: settings.paused ? 'Turn snowfall on' : 'Turn snowfall off', enabled: settings.enabled, click: () => {
+    { label: 'Turn ' + (settings.weather === 'rain' ? 'rainfall' : 'snowfall') +
+      (settings.paused ? ' on' : ' off'), enabled: settings.enabled, click: () => {
       update({ paused: !settings.paused }).catch(console.error);
     } },
+    { label: 'Weather', enabled: settings.enabled, submenu: [
+      { label: 'Snow', type: 'radio', checked: settings.weather !== 'rain', click: () => update({ weather: 'snow' }).catch(console.error) },
+      { label: 'Rain', type: 'radio', checked: settings.weather === 'rain', click: () => update({ weather: 'rain' }).catch(console.error) },
+    ] },
     { type: 'separator' },
+    { label: 'Open diagnostic log', click: () => { shell.openPath(diagnostics.file).catch(console.error); } },
     { label: 'Quit', click: () => app.quit() },
   ]));
 }
 
+// The panel is a flyout above the tray icon: nothing stays pinned on the desktop.
+let panelHiddenAt = 0, panelPinned = false, showWhenSized = false;
+
+function placeFlyout() {
+  const { width, height } = panel.getBounds();
+  const icon = tray.getBounds();
+  const anchor = icon.width > 0 ? { x: icon.x + icon.width / 2, y: icon.y + icon.height / 2 } : screen.getCursorScreenPoint();
+  const display = screen.getDisplayNearestPoint({ x: Math.round(anchor.x), y: Math.round(anchor.y) });
+  const area = display.workArea, full = display.bounds, gap = 8;
+  const clampX = x => Math.round(Math.max(area.x + gap, Math.min(x, area.x + area.width - width - gap)));
+  const clampY = y => Math.round(Math.max(area.y + gap, Math.min(y, area.y + area.height - height - gap)));
+  let x = clampX(anchor.x - width / 2), y = area.y + area.height - height - gap;
+  if (area.y > full.y) y = area.y + gap;
+  else if (area.x > full.x) { x = area.x + gap; y = clampY(anchor.y - height / 2); }
+  else if (area.width < full.width) { x = area.x + area.width - width - gap; y = clampY(anchor.y - height / 2); }
+  panel.setPosition(x, Math.round(y));
+}
+
 function showPanel() {
+  placeFlyout();
   panel.show();
   panel.focus();
 }
 
+function togglePanel() {
+  if (panel.isVisible()) hidePanel();
+  // A click on the tray icon first blurs (and hides) the open flyout; don't reopen it at once.
+  else if (Date.now() - panelHiddenAt > 300) showPanel();
+}
+
 function hidePanel() {
+  if (!panel.isVisible()) return;
   panel.hide();
+  panelHiddenAt = Date.now();
   if (trayHintShown) return;
   trayHintShown = true;
   tray.displayBalloon({
     title: 'Wintermas is still running',
-    content: 'Double-click the Wintermas icon near the clock to bring back the widget.',
+    content: 'Click the Wintermas icon near the clock to open it again.',
     iconType: 'custom',
     noSound: true,
   });
+  // Saving the settings marks the first run as done, so the hint is not repeated.
+  save = save.catch(() => {}).then(() => writeFile(settingsFile, JSON.stringify(settings, null, 2))).catch(() => {});
 }
 
 function sizeWidget(open, contentHeight) {
-  const bounds = panel.getBounds();
-  const area = screen.getDisplayMatching(bounds).workArea;
-  const { width, height: desiredHeight } = open ? expanded : collapsed;
-  const requested = open && Number.isFinite(contentHeight) ? Math.max(160, Math.min(desiredHeight, Math.ceil(contentHeight))) : desiredHeight;
-  const height = Math.min(requested, area.height);
-  const centered = Math.round(bounds.x + (bounds.width - width) / 2);
-  const x = Math.max(area.x, Math.min(centered, area.x + area.width - width));
-  const y = Math.max(area.y, Math.min(bounds.y, area.y + area.height - height));
-  panel.setBounds({ x, y, width, height });
+  const area = screen.getDisplayMatching(panel.getBounds()).workArea;
+  const { width, height: desiredHeight } = expanded;
+  const requested = Number.isFinite(contentHeight) ? Math.max(160, Math.min(desiredHeight, Math.ceil(contentHeight))) : desiredHeight;
+  panel.setSize(width, Math.min(requested, area.height - 16));
+  placeFlyout();
+  if (showWhenSized && Number.isFinite(contentHeight)) {
+    showWhenSized = false;
+    showPanel();
+  }
 }
 
 function refreshOverlays() {
+  displayCache = undefined;
   const displays = screen.getAllDisplays();
   const ids = new Set(displays.map(display => display.id));
   for (const [id, win] of overlays) {
@@ -88,6 +130,9 @@ function refreshOverlays() {
       },
     });
     overlays.set(display.id, win);
+    diagnostics.watch(win.webContents, 'overlay:' + display.id);
+    diagnostics.write('info', 'overlay', 'created', { display: display.id, bounds: display.bounds,
+      scale: display.scaleFactor, hz: display.displayFrequency });
     win.setAlwaysOnTop(true, 'pop-up-menu');
     win.setIgnoreMouseEvents(true);
     win.webContents.on('did-finish-load', () => {
@@ -127,6 +172,8 @@ async function update(patch) {
   for (const key of ['enabled', 'paused', 'taskbar', 'startup']) {
     if (typeof patch[key] === 'boolean') settings[key] = patch[key];
   }
+  if (weathers.includes(patch.weather)) settings.weather = patch.weather;
+  diagnostics.write('info', 'settings', 'changed', patch);
   if ('startup' in patch) {
     app.setLoginItemSettings({
       openAtLogin: settings.startup,
@@ -151,10 +198,11 @@ async function update(patch) {
 function broadcastGeometry(windows, pressed, control) {
   if (locked || !settings.enabled) return;
   const mouse = screen.getCursorScreenPoint();
-  const displays = new Map(screen.getAllDisplays().map(display => [display.id, display]));
+  displayCache ??= new Map(screen.getAllDisplays().map(display => [display.id, display]));
+  const displays = displayCache;
   for (const [id, win] of overlays) {
     const display = displays.get(id);
-    if (!display) continue;
+    if (!display || !win.isVisible()) continue;
     const { x, y, width, height } = display.bounds;
     const origin = screen.dipToScreenPoint({ x, y });
     const scale = display.scaleFactor;
@@ -178,6 +226,7 @@ function broadcastGeometry(windows, pressed, control) {
 
 function startTracking() {
   worker = spawn(native, [String(process.pid)], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
+  diagnostics.write('info', 'tracker', 'desktop helper started', { pid: worker.pid });
   worker.stdin.on('error', () => {});
   worker.on('error', console.error);
   const lines = createInterface({ input: worker.stdout });
@@ -191,7 +240,8 @@ function startTracking() {
       broadcastGeometry(windows, pressed, control);
     } catch (error) { console.error(error.message); }
   });
-  worker.once('close', () => {
+  worker.once('close', code => {
+    diagnostics.write(quitting ? 'info' : 'warn', 'tracker', 'desktop helper stopped', { code });
     worker = undefined;
     tracking = false;
     send(panel, 'desktop', { tracking });
@@ -202,15 +252,11 @@ function startTracking() {
 
 async function smokeTest() {
   try {
-    const initial = panel.getBounds();
-    const workArea = screen.getPrimaryDisplay().workArea;
-    const centered = Math.abs(initial.x + initial.width / 2 - workArea.x - workArea.width / 2) <= 1;
     const panelCheck = await panel.webContents.executeJavaScript(`(async () => {
       const toggle = document.querySelector('#toggle');
-      const initiallyClosed = toggle.getAttribute('aria-expanded') === 'false';
-      const icon = toggle.querySelector('img').getBoundingClientRect();
-      const iconCentered = Math.abs(icon.left + icon.width / 2 - innerWidth / 2) <= 1;
-      toggle.click();
+      for (let i = 0; i < 40 && document.querySelector('#menu').hidden; i++) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
       await new Promise(resolve => setTimeout(resolve, 600));
       const menu = document.querySelector('#menu');
       const open = !menu.hidden;
@@ -222,16 +268,15 @@ async function smokeTest() {
       const enabledAfterToggle = !options.disabled;
       const bottom = menu.getBoundingClientRect().bottom;
       const height = innerHeight;
-      return { initiallyClosed, open, actions, iconReady, iconCentered, bottom, height, disabledByDefault, enabledAfterToggle };
+      return { open, actions, iconReady, bottom, height, disabledByDefault, enabledAfterToggle };
     })()`);
+    const flyout = panel.getBounds();
+    const flyoutArea = screen.getDisplayMatching(flyout).workArea;
+    const insideWorkArea = flyout.x >= flyoutArea.x && flyout.y >= flyoutArea.y &&
+      flyout.x + flyout.width <= flyoutArea.x + flyoutArea.width && flyout.y + flyout.height <= flyoutArea.y + flyoutArea.height;
     if (process.env.WINTERMAS_SMOKE_PREVIEW) {
       await writeFile(process.env.WINTERMAS_SMOKE_PREVIEW, (await panel.capturePage()).toPNG());
     }
-    const closed = await panel.webContents.executeJavaScript(`(async () => {
-      document.querySelector('#toggle').click();
-      await new Promise(resolve => setTimeout(resolve, 600));
-      return document.querySelector('#menu').hidden;
-    })()`);
     const deadline = Date.now() + 4000;
     while ((!tracking || [...overlays.values()].some(win => win.webContents.isLoading())) && Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 80));
@@ -250,7 +295,7 @@ async function smokeTest() {
           document.querySelector('canvas').width > 0;
       })()`
     )));
-    const panelReady = centered && panelCheck.iconCentered && panelCheck.iconReady && panelCheck.initiallyClosed && panelCheck.open && closed &&
+    const panelReady = insideWorkArea && panelCheck.iconReady && panelCheck.open &&
       panelCheck.disabledByDefault && panelCheck.enabledAfterToggle &&
       panelCheck.actions === 7 && panelCheck.bottom <= panelCheck.height;
     if (!tracking || !panelReady || !renderers.length || !renderers.every(Boolean)) {
@@ -306,12 +351,16 @@ async function start() {
     const stored = JSON.parse(await readFile(settingsFile, 'utf8'));
     settings = Object.fromEntries(Object.entries(defaults).map(([key, value]) =>
       [key, typeof stored[key] === typeof value ? stored[key] : value]));
+    trayHintShown = true; // the "where did it go" hint is only for the very first run
   }
   catch (error) { if (error.code !== 'ENOENT') console.error(error.message); }
+  if (!weathers.includes(settings.weather)) settings.weather = defaults.weather;
   if (process.argv.includes('--smoke-test')) settings = { ...defaults };
+  await diagnostics.start({ settings, displays: screen.getAllDisplays().map(display => ({ id: display.id,
+    bounds: display.bounds, scale: display.scaleFactor, hz: display.displayFrequency })) });
   const area = screen.getPrimaryDisplay().workArea;
   panel = new BrowserWindow({
-    ...collapsed, x: area.x + Math.floor((area.width - collapsed.width) / 2), y: area.y + 14,
+    ...expanded, x: area.x + area.width - expanded.width - 8, y: area.y + area.height - expanded.height - 8,
     show: false, icon, frame: false, transparent: true, skipTaskbar: true,
     resizable: false, minimizable: false, maximizable: false, fullscreenable: false,
     title: 'Wintermas · Christmas',
@@ -319,12 +368,19 @@ async function start() {
   });
   panel.setAlwaysOnTop(true, 'screen-saver');
   panel.on('close', event => { if (!quitting) { event.preventDefault(); hidePanel(); } });
+  panel.on('blur', () => { if (!panelPinned && !process.argv.includes('--smoke-test')) hidePanel(); });
   tray = new Tray(icon.resize({ width: 32, height: 32, quality: 'best' }));
   tray.setToolTip('Wintermas');
+  tray.on('click', togglePanel);
   tray.on('double-click', showPanel);
   tray.on('balloon-click', showPanel);
   trayMenu();
   ipcMain.handle('settings:get', () => ({ ...settings, tracking }));
+  ipcMain.on('diag:log', (event, entry) => {
+    const overlay = [...overlays].find(([, win]) => win.webContents === event.sender);
+    diagnostics.write('info', overlay ? 'overlay:' + overlay[0] : 'panel', entry?.type ?? 'event', entry);
+  });
+  diagnostics.watch(panel.webContents, 'panel');
   ipcMain.on('snowball:pointer', (event, capture) => {
     const overlay = [...overlays.values()].find(win => win.webContents === event.sender);
     if (overlay) overlay.setIgnoreMouseEvents(!(capture === true && !locked && settings.enabled));
@@ -337,6 +393,9 @@ async function start() {
   ipcMain.handle('settings:set', (event, patch) => event.sender === panel.webContents ? update(patch) : settings);
   ipcMain.handle('widget:open', (event, open, contentHeight) => {
     if (event.sender === panel.webContents) sizeWidget(open === true, contentHeight);
+  });
+  ipcMain.on('widget:pin', (event, pinned) => {
+    if (event.sender === panel.webContents) panelPinned = pinned === true;
   });
   ipcMain.handle('widget:hide', event => {
     if (event.sender === panel.webContents) hidePanel();
@@ -354,10 +413,15 @@ async function start() {
   });
   for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(event, refreshOverlays);
   powerMonitor.on('lock-screen', () => { locked = true; syncRuntime(); });
+  for (const event of ['suspend', 'resume', 'on-battery', 'on-ac']) {
+    powerMonitor.on(event, () => diagnostics.write('info', 'power', event));
+  }
   powerMonitor.on('unlock-screen', () => { locked = false; syncRuntime(); });
   syncRuntime();
+  // Opened by hand: show the flyout once it has its final size. Started with Windows (--quiet): stay in the tray.
+  if (!process.argv.includes('--smoke-test') && !process.argv.includes('--quiet')) showWhenSized = true;
   await panel.loadFile('ui/index.html');
-  if (!process.argv.includes('--smoke-test')) panel.showInactive();
+
   if (process.argv.includes('--smoke-test')) setTimeout(smokeTest, 2500);
 }
 

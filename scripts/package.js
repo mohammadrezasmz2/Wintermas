@@ -19,7 +19,7 @@ try {
       electronLanguages: ['en-US'],
       npmRebuild: false,
       asar: true,
-      files: ['main.js', 'preload.cjs', 'ui/**/*'],
+      files: ['main.js', 'diagnostics.js', 'preload.cjs', 'ui/**/*'],
       extraResources: [{ from: 'native/desktop.exe', to: 'native/desktop.exe' }],
       win: { icon: 'ui/icon.png', signExecutable: false },
       nsis: {
