@@ -13,7 +13,7 @@ test('fast motion throws a bounded fraction of snow, not the whole window', () =
   const result = shedOnWindowMotion(bank, { dx: 140, dy: -45 }, 0.06);
   assert.ok(result.dislodged.length > 0);
   assert.ok(result.dislodged.length <= 40);
-  assert.ok([...bank].some(value => value === 9));
+  assert.ok([...bank].every(value => value > 0 && value < 9));
   assert.ok([...bank].every(value => value >= 0));
 });
 test('natural snowbank remains rounded and nonnegative', () => {

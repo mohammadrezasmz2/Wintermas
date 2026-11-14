@@ -24,6 +24,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm.cmd exec -- install-electron
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify unit tests before packaging
+        shell: pwsh
+        run: |
+          node --test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check ui/overlay.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build Windows installer
         shell: pwsh
         run: |
@@ -40,7 +47,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: v0.2.1-preview.4
+          RELEASE_TAG: v0.2.1-preview.5
         run: |
-          gh release create $env:RELEASE_TAG 'dist/setup/Wintermas-Setup.exe' --target $env:GITHUB_SHA --title 'Wintermas 0.2.1 Preview 4' --prerelease --notes 'Preview build with isolated weather, window occlusion, speed controls, snow and snowplough fixes. Windows testing recommended before stable release.'
+          gh release create $env:RELEASE_TAG 'dist/setup/Wintermas-Setup.exe' --target $env:GITHUB_SHA --title 'Wintermas 0.2.1 Preview 5' --prerelease --notes 'Preview build with isolated weather, window occlusion, speed controls, snow and snowplough fixes. Windows testing recommended before stable release.'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
