@@ -97,6 +97,9 @@ function show(settings) {
   const iconKey = settings.weather === 'rain' ? 'iconsRain' :
     settings.weather === 'autumn' ? 'iconsAutumn' : 'iconsSnow';
   id('icon-weather').checked = settings[iconKey] === true;
+  const excluded = id('bottom-edge-exclude-apps');
+  if (document.activeElement !== excluded)
+    excluded.value = (settings.bottomEdgeExcludeApps ?? []).join('\n');
   id('snow-diameter').value = settings.snowDiameter ?? 5;
   id('snow-diameter-value').textContent = id('snow-diameter').value + ' px';
   paint('snow-diameter');
@@ -134,6 +137,13 @@ document.addEventListener('keydown', event => {
 id('enabled').addEventListener('change', () => update({ enabled: id('enabled').checked }));
 id('snow').addEventListener('change', () => update({ paused: !id('snow').checked }));
 id('taskbar').addEventListener('change', () => update({ taskbar: id('taskbar').checked }));
+id('bottom-edge-exclude-apps').addEventListener('change', () => {
+  update({ bottomEdgeExcludeApps: id('bottom-edge-exclude-apps').value
+    .split(/[\\r\\n,;]+/).map(name => name.trim()).filter(Boolean) });
+});
+id('bottom-app-controls').addEventListener('toggle', () => {
+  if (!menu.hidden) wintermas.widget(true, menu.offsetTop + menu.scrollHeight + 6).catch(report);
+});
 id('icon-weather').addEventListener('change', () => {
   const weather = document.querySelector('input[name=weather]:checked')?.value ?? 'snow';
   const key = weather === 'rain' ? 'iconsRain' :

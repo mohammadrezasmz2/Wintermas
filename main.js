@@ -1,11 +1,12 @@
 import { app, BrowserWindow, Menu, Tray, nativeImage, screen, ipcMain, powerMonitor, globalShortcut, shell } from 'electron';
 import { createDiagnostics } from './diagnostics.js';
 import { spawn } from 'node:child_process';
+import { normalizeBottomEdgeApps } from './ui/window-exclusions.js';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 
-const defaults = { enabled: false, intensity: 65, wind: 15, snowSpeed: 100, snowDiameter: 5, rainSpeed: 100, autumnSpeed: 100, taskbar: true, iconsSnow: true, iconsRain: true, iconsAutumn: true, paused: true, startup: false, weather: 'snow' };
+const defaults = { enabled: false, intensity: 65, wind: 15, snowSpeed: 100, snowDiameter: 5, rainSpeed: 100, autumnSpeed: 100, taskbar: true, iconsSnow: true, iconsRain: true, iconsAutumn: true, bottomEdgeExcludeApps: ['SLDWORKS.exe'], paused: true, startup: false, weather: 'snow' };
 const collapsed = { width: 96, height: 54 };
 const expanded = { width: 342, height: 735 };
 const appPath = app.getAppPath();
@@ -186,6 +187,7 @@ async function update(patch) {
   for (const key of ['enabled', 'paused', 'taskbar', 'startup', 'iconsSnow', 'iconsRain', 'iconsAutumn']) {
     if (typeof patch[key] === 'boolean') settings[key] = patch[key];
   }
+  if ('bottomEdgeExcludeApps' in patch) settings.bottomEdgeExcludeApps = normalizeBottomEdgeApps(patch.bottomEdgeExcludeApps);
   if (weathers.includes(patch.weather)) settings.weather = patch.weather;
   diagnostics.write('info', 'settings', 'changed', patch);
   if ('startup' in patch) {
@@ -227,7 +229,8 @@ function broadcastGeometry(windows, pressed, control, minimized = [], moving = n
       const right = (rect.right - origin.x) / scale;
       const bottom = (rect.bottom - origin.y) / scale;
       if (right > 0 && bottom > 0 && left < width && top < height) {
-        rectangles.push({ id: rect.id, left, top, right, bottom, taskbar: rect.taskbar });
+        rectangles.push({ id: rect.id, left, top, right, bottom, taskbar: rect.taskbar,
+          processName: rect.processName ?? '' });
       }
     }
     const workBottom = display.workArea.y + display.workArea.height - y;
@@ -395,6 +398,7 @@ async function start() {
     trayHintShown = true; // the "where did it go" hint is only for the very first run
   }
   catch (error) { if (error.code !== 'ENOENT') console.error(error.message); }
+  settings.bottomEdgeExcludeApps = normalizeBottomEdgeApps(settings.bottomEdgeExcludeApps);
   if (!weathers.includes(settings.weather)) settings.weather = defaults.weather;
   if (process.argv.includes('--smoke-test')) settings = { ...defaults };
   await diagnostics.start({ settings, displays: screen.getAllDisplays().map(display => ({ id: display.id,

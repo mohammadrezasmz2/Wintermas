@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -49,6 +50,24 @@ static class Desktop {
     [DllImport("winmm")] static extern uint timeBeginPeriod(uint period);
     [DllImport("winmm")] static extern uint timeEndPeriod(uint period);
 
+    static string ProcessName(uint pid, Dictionary<uint, string> cache) {
+        string cached;
+        if (cache.TryGetValue(pid, out cached)) return cached;
+        string processName = "";
+        try {
+            processName = Process.GetProcessById((int)pid).ProcessName + ".exe";
+            // Escape neither paths nor arbitrary app titles: transmit only
+            // a safe executable basename for exact matching in the renderer.
+            var safe = new StringBuilder();
+            foreach (char c in processName) {
+                if (char.IsLetterOrDigit(c) || c == '.' || c == '_' || c == '-' || c == ' ') safe.Append(c);
+            }
+            processName = safe.ToString();
+        } catch { /* windows from higher privilege levels may be inaccessible */ }
+        cache[pid] = processName;
+        return processName;
+    }
+
     static bool IsApplicationSurface(IntPtr hwnd, Rect bounds) {
         int extended = GetWindowLong(hwnd, GwlExStyle);
         int style = GetWindowLong(hwnd, GwlStyle);
@@ -75,7 +94,13 @@ static class Desktop {
         Point lastCursor = new Point();
         int lastSent = 0;
         bool fineTimer = false;
+        var processCache = new Dictionary<uint, string>();
+        DateTime refreshProcessCacheAt = DateTime.MinValue;
         while (true) {
+            if (DateTime.UtcNow >= refreshProcessCacheAt) {
+                processCache.Clear();
+                refreshProcessCacheAt = DateTime.UtcNow.AddSeconds(15);
+            }
             var windows = new List<string>();
             var minimized = new List<string>();
             EnumWindows(delegate(IntPtr hwnd, IntPtr ignored) {
@@ -99,9 +124,11 @@ static class Desktop {
                 if (DwmGetWindowAttribute(hwnd, 9, out bounds, 16) != 0 && !GetWindowRect(hwnd, out bounds)) return true;
                 if (bounds.Right - bounds.Left < 32 || bounds.Bottom - bounds.Top < 16) return true;
                 if (!taskbar && !IsApplicationSurface(hwnd, bounds)) return true;
+                string processName = taskbar ? "" : ProcessName(owner, processCache);
                 windows.Add(string.Format(CultureInfo.InvariantCulture,
-                    "{{\"id\":\"{0:X}\",\"left\":{1},\"top\":{2},\"right\":{3},\"bottom\":{4},\"taskbar\":{5}}}",
-                    hwnd.ToInt64(), bounds.Left, bounds.Top, bounds.Right, bounds.Bottom, taskbar ? "true" : "false"));
+                    "{{\"id\":\"{0:X}\",\"left\":{1},\"top\":{2},\"right\":{3},\"bottom\":{4},\"taskbar\":{5},\"processName\":\"{6}\"}}",
+                    hwnd.ToInt64(), bounds.Left, bounds.Top, bounds.Right, bounds.Bottom,
+                    taskbar ? "true" : "false", processName));
                 return true;
             }, IntPtr.Zero);
             bool pressed = GetAsyncKeyState(1) < 0;

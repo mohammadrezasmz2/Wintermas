@@ -1,4 +1,5 @@
 import { landing, bottomTaskbarAt } from './geometry.js';
+import { bottomExclusionMasks, bottomExcludedAt } from './window-exclusions.js';
 import { snowStep, snowStepInPlace } from './snow-motion.js';
 import { resizeProfile } from './snow-profile.js';
 import { drawPlough, drawSanta, drawSnowman, drawBall, makeSnowGrain } from './snow-art.js';
@@ -392,6 +393,10 @@ function addPile(hit, amount = 1) {
   const { x } = hit;
   const rect = hit.rect.id === 'ground' ? bottomTaskbarAt(taskbars, x, height) ?? hit.rect : hit.rect;
   if (rect.taskbar && (!settings.taskbar || settings.paused)) return;
+  // Excluded programs (SolidWorks, CAD editors, etc.) must not accumulate
+  // hidden snow at the bottom while their window is open.
+  if ((rect.taskbar || rect.id === 'ground') &&
+      bottomExcludedAt(rectangles, settings.bottomEdgeExcludeApps, x)) return;
   // Do not paint a new ridge using an obsolete rectangle while moving.
   if (hideMovingWindowSnow(rect.id, movingWindowDrag, movingWindowHoldUntil,
       performance.now())) return;
@@ -778,6 +783,14 @@ function paintProfile(pile, covers, now) {
   if (!raster) return;
   const top = rect.top - raster.baseline;
   ctx.save();
+  // Snow rests ABOVE a window; none of the white raster may spill into its
+  // titlebar, document area or CAD work surface.
+  if (!rect.taskbar && rect.id !== 'ground') {
+    ctx.beginPath();
+    ctx.rect(-128, -128, width + 256, height + 256);
+    ctx.rect(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+    ctx.clip('evenodd');
+  }
   for (const cover of covers) {
     if (cover.right <= rect.left || cover.left >= rect.right || cover.bottom <= top || cover.top >= rect.top + 1) continue;
     ctx.beginPath();
@@ -790,12 +803,17 @@ function paintProfile(pile, covers, now) {
 }
 
 function paintPiles(now) {
-  paintProfile(ground, taskbars, now);
+  const bottomMasks = bottomExclusionMasks(rectangles, settings.bottomEdgeExcludeApps, height);
+  // Ground effects are behind *every* app window, not in its content.
+  // Excluded apps additionally hide the entire lower-edge strip under them.
+  paintProfile(ground, [...rectangles, ...bottomMasks], now);
   // Do not paint stale piles for windows omitted by the native tracker.
   rectangles.forEach((rect, z) => {
     const pile = piles.get(rect.id);
-    if (pile && !hideMovingWindowSnow(rect.id, movingWindowDrag,
-        movingWindowHoldUntil, now)) paintProfile(pile, rectangles.slice(0, z), now);
+    if (!pile || hideMovingWindowSnow(rect.id, movingWindowDrag,
+        movingWindowHoldUntil, now)) return;
+    const covers = rectangles.slice(0, z);
+    paintProfile(pile, rect.taskbar ? [...covers, ...bottomMasks] : covers, now);
   });
 }
 
@@ -1115,9 +1133,12 @@ function rollOnSnow(ball, point, travel) {
 function updateBallPointer(next, dt) {
 
   const hovered = balls.findLast(ball => Math.hypot(ball.x - next.x, ball.y - next.y) <= ball.size + 3);
-  const snow = snowAt(next);
+  // Clicking ordinary GUI controls must never create snow from the pointer.
+  // Creating a new ball from a snowbank requires an explicit Ctrl+click;
+  // the existing Make Snowball button still works without this shortcut.
+  const snow = next.control ? snowAt(next) : null;
   if (!next.pressed || grabbed) capturePointer(Boolean(grabbed || hovered || snow));
-  if (next.pressed && !mouse.pressed && (hovered || snow)) {
+  if (next.pressed && !mouse.pressed && (hovered || (next.control && snow))) {
     const root = hovered && stackRoot(hovered);
     const assembled = root && stackMembers(root).length >= 3;
     grabbed = assembled ? root : hovered;
@@ -1325,12 +1346,15 @@ function drawScene(now, dt) {
     paintIconSnow(ctx, iconPiles, now);
     ctx.restore();
   }
-  if (settings.weather === 'autumn') autumn.paint(ctx, now);
+  if (settings.weather === 'autumn') autumn.paint(ctx, now,
+    bottomExclusionMasks(rectangles, settings.bottomEdgeExcludeApps, height));
   rain.paint(ctx, rectangles);
   for (const p of accents) if (p.kind !== 'chunk' && p.kind !== 'santa') paintParticle(p, now);
   ctx.save();
-  // Keep Santa, snowballs, the plough and decorations outside taskbar internals.
-  clipPrecipitation(ctx, taskbars, width, height);
+  // Everything interactive is also hidden inside application window content.
+  // Selected apps mask their bottom-edge effects down to the screen boundary.
+  clipPrecipitation(ctx, [...rectangles, ...bottomExclusionMasks(
+    rectangles, settings.bottomEdgeExcludeApps, height)], width, height);
   for (const p of accents) if (p.kind === 'santa') paintParticle(p, now);
   paintSnowProps(now);
   if (settings.weather !== 'autumn') paintDecor(now, dt);

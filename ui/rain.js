@@ -205,19 +205,7 @@ export function createRain(canvas) {
       const icon = entry.icon;
       const span = icon.right - icon.left;
       const n = Math.max(8, icon.contour?.length ?? 24);
-      ctx.lineWidth = 1.2;
-      ctx.strokeStyle = `rgba(175, 211, 242, ${(entry.level * .50).toFixed(3)})`;
-      ctx.beginPath();
-      let drawing = false;
-      for (let i = 0; i < n; i++) {
-        const x = icon.left + (i+.5)*span/n;
-        const y = iconContactY(icon, x);
-        if (y === null) { drawing = false; continue; }
-        if (!drawing) ctx.moveTo(x,y-1.2);
-        else ctx.lineTo(x,y-1.2);
-        drawing = true;
-      }
-      ctx.stroke();
+      // Transparent outline: no connected band across app logos or folders.
       const x = Math.min(icon.right-1,Math.max(icon.left+1,entry.x));
       const y = iconContactY(icon,x);
       if (y !== null) {
@@ -295,7 +283,8 @@ export function createRain(canvas) {
       if (!renderer && drops.length) paintDropsFallback(ctx);
       if (splashes.length) paintSplashes(ctx);
       ctx.restore();
-      if (wet.size) paintWetEdges(ctx, rectangles);
+      // Never paint persistent light stripes along any impact edge.
+      // Short splashes and momentary droplets remain visible.
       if (iconWet.size) paintWetIcons(ctx, rectangles);
     },
     clear() {
