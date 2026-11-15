@@ -1,0 +1,83 @@
+name: Build Wintermas preview installer
+
+on:
+  push:
+    branches:
+      - fix/separate-weather-and-taskbar-art
+
+permissions:
+  contents: write
+
+jobs:
+  preview:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          npm.cmd ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm.cmd exec -- install-electron
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify unit tests before packaging
+        shell: pwsh
+        run: |
+          node --test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check ui/overlay.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build standard Windows NSIS installer
+        shell: pwsh
+        run: |
+          npm.cmd run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!(Test-Path 'dist/setup/Wintermas-Setup.exe')) { throw 'Installer missing' }
+      - name: Verify EXE, compute SHA-256 and test silent installation
+        shell: pwsh
+        run: |
+          $installer = (Resolve-Path 'dist/setup/Wintermas-Setup.exe').Path
+          $file = [System.IO.File]::OpenRead($installer)
+          try {
+            if ($file.ReadByte() -ne 77 -or $file.ReadByte() -ne 90) {
+              throw 'Installer does not contain the Windows MZ executable header'
+            }
+          } finally { $file.Dispose() }
+          $signature = Get-AuthenticodeSignature -FilePath $installer
+          Write-Host "Authenticode status: $($signature.Status)"
+          if ($signature.Status -notin @('Valid', 'NotSigned')) {
+            throw "Unexpected signature failure: $($signature.Status)"
+          }
+          $hash = (Get-FileHash -Algorithm SHA256 -Path $installer).Hash.ToLowerInvariant()
+          [System.IO.File]::WriteAllText(
+            (Join-Path (Get-Location) 'dist/setup/Wintermas-Setup.exe.sha256'),
+            "$hash  Wintermas-Setup.exe`n", [System.Text.Encoding]::ASCII)
+          Write-Host "Installer SHA256: $hash"
+          $target = Join-Path $env:RUNNER_TEMP 'Wintermas-Install-Smoke'
+          $installerArgs = @('/S', '/currentuser', "/D=$target")
+          $process = Start-Process -FilePath $installer -ArgumentList $installerArgs -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "NSIS silent install failed: $($process.ExitCode)" }
+          if (!(Test-Path (Join-Path $target 'Wintermas.exe'))) {
+            throw "NSIS completed but Wintermas.exe is absent from $target"
+          }
+          Write-Host 'Standard NSIS installer smoke test passed.'
+      - name: Upload installer and checksum as build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wintermas-Preview-Windows-x64
+          path: |
+            dist/setup/Wintermas-Setup.exe
+            dist/setup/Wintermas-Setup.exe.sha256
+          if-no-files-found: error
+      - name: Publish preview download
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: v0.2.1-preview.21
+        run: |
+          gh release create $env:RELEASE_TAG 'dist/setup/Wintermas-Setup.exe' 'dist/setup/Wintermas-Setup.exe.sha256' --target $env:GITHUB_SHA --title 'Wintermas 0.2.1 Preview 21 — Preview 18 icons and weather-on-icons switches' --prerelease --notes 'Preview 21: restores the desktop icon shape recognition and placement from Preview 18 as requested, while preserving stable snowbank anchors and fast dragging. Adds persistent separate Snow, Rain and Autumn switches controlling weather accumulation on desktop icons; Rain wets icon crests, Autumn leaves settle on them, and disabling a switch clears its icon effect immediately. Includes conservative fallback instead of inventing deep icon contours. Preserves instant icon-drag shedding and stable anchors. Previous instant mouse-drag powder shedding preserved. Uses safe UI Automation and shell icon APIs without Explorer injection. Direct NSIS installer with Windows smoke test and SHA-256 checksum. Direct standard NSIS installer with install smoke test and SHA-256 checksum. IMPORTANT: unsigned preview; do not bypass antivirus warnings.'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -94,11 +94,22 @@ function show(settings) {
   id('options').disabled = !settings.enabled;
   id('snow').checked = !settings.paused;
   id('taskbar').checked = settings.taskbar;
+  const iconKey = settings.weather === 'rain' ? 'iconsRain' :
+    settings.weather === 'autumn' ? 'iconsAutumn' : 'iconsSnow';
+  id('icon-weather').checked = settings[iconKey] === true;
+  id('snow-diameter').value = settings.snowDiameter ?? 5;
+  id('snow-diameter-value').textContent = id('snow-diameter').value + ' px';
+  paint('snow-diameter');
   for (const key of ['intensity', 'wind']) {
     id(key).value = settings[key];
     id(key + '-value').textContent = settings[key] + ' %';
     paint(key);
   }
+  const speed = settings.weather === 'rain' ? settings.rainSpeed :
+    settings.weather === 'autumn' ? settings.autumnSpeed : settings.snowSpeed;
+  id('speed').value = speed ?? 100;
+  id('speed-value').textContent = (speed ?? 100) + ' %';
+  paint('speed');
 }
 const update = patch => wintermas.update(patch).catch(report);
 id('hide-widget').addEventListener('click', async () => {
@@ -123,10 +134,31 @@ document.addEventListener('keydown', event => {
 id('enabled').addEventListener('change', () => update({ enabled: id('enabled').checked }));
 id('snow').addEventListener('change', () => update({ paused: !id('snow').checked }));
 id('taskbar').addEventListener('change', () => update({ taskbar: id('taskbar').checked }));
+id('icon-weather').addEventListener('change', () => {
+  const weather = document.querySelector('input[name=weather]:checked')?.value ?? 'snow';
+  const key = weather === 'rain' ? 'iconsRain' :
+    weather === 'autumn' ? 'iconsAutumn' : 'iconsSnow';
+  update({ [key]: id('icon-weather').checked });
+});
 for (const key of ['intensity', 'wind']) {
   id(key).addEventListener('input', () => { id(key + '-value').textContent = id(key).value + ' %'; paint(key); });
   id(key).addEventListener('change', () => update({ [key]: Number(id(key).value) }));
 }
+id('snow-diameter').addEventListener('input', () => {
+  id('snow-diameter-value').textContent = id('snow-diameter').value + ' px';
+  paint('snow-diameter');
+});
+id('snow-diameter').addEventListener('change', () =>
+  update({ snowDiameter: Number(id('snow-diameter').value) }));
+id('speed').addEventListener('input', () => {
+  id('speed-value').textContent = id('speed').value + ' %';
+  paint('speed');
+});
+id('speed').addEventListener('change', () => {
+  const weather = document.querySelector('input[name=weather]:checked')?.value;
+  update({ [weather === 'rain' ? 'rainSpeed' : weather === 'autumn' ?
+    'autumnSpeed' : 'snowSpeed']: Number(id('speed').value) });
+});
 for (const button of document.querySelectorAll('[data-action]')) {
   button.addEventListener('click', async () => {
     try {
@@ -152,12 +184,40 @@ id('light-color').addEventListener('change', () => {
 });
 wintermas.onSettings(show);
 wintermas.settings().then(show).catch(report);
-/* ---- v0.2: weather selector (snow / rain) ---- */
+/* ---- Independent Snow, Rain and Autumn modes ---- */
 function showWeather(settings) {
-  const weather = settings.weather === 'rain' ? 'rain' : 'snow';
+  const weather = ['snow', 'rain', 'autumn'].includes(settings.weather)
+    ? settings.weather : 'snow';
   document.body.classList.toggle('theme-rain', weather === 'rain');
-  for (const input of document.querySelectorAll('input[name=weather]')) input.checked = input.value === weather;
-  id('fall-label').textContent = weather === 'rain' ? 'Rainfall' : 'Snowfall';
+  document.body.classList.toggle('theme-autumn', weather === 'autumn');
+  for (const input of document.querySelectorAll('input[name=weather]'))
+    input.checked = input.value === weather;
+  id('fall-label').textContent = weather === 'rain' ? 'Rainfall' :
+    weather === 'autumn' ? 'Falling leaves' : 'Snowfall';
+  id('speed-label').textContent = weather === 'rain' ? 'Rain speed' :
+    weather === 'autumn' ? 'Leaf speed' : 'Snow speed';
+  id('snow-actions').hidden = weather !== 'snow';
+  id('autumn-actions').hidden = weather !== 'autumn';
+  document.querySelector('.decor').hidden = weather === 'autumn';
+  id('taskbar-option').hidden = weather === 'rain';
+  id('snow-diameter-option').hidden = weather !== 'snow';
+  const iconKey = weather === 'rain' ? 'iconsRain' :
+    weather === 'autumn' ? 'iconsAutumn' : 'iconsSnow';
+  id('icon-weather').checked = settings[iconKey] === true;
+  id('icon-weather-label').textContent = weather === 'rain' ?
+    'Rain on desktop icons' : weather === 'autumn' ?
+    'Leaves on desktop icons' : 'Snow on desktop icons';
+  document.querySelector('#taskbar-option > span').textContent =
+    weather === 'autumn' ? 'Leaves on the taskbar' : 'Snow on the taskbar';
+  document.querySelector('.hint').textContent = weather === 'autumn'
+    ? 'Move the mouse through leaves to swirl them. Swipe over piles to toss them back into the air.'
+    : 'Click and drag across a snowbank to roll a snowball.';
+  document.querySelector('.hint').hidden = weather === 'rain';
+  const speed = weather === 'rain' ? settings.rainSpeed : weather === 'autumn' ?
+    settings.autumnSpeed : settings.snowSpeed;
+  id('speed').value = speed ?? 100;
+  id('speed-value').textContent = (speed ?? 100) + ' %';
+  paint('speed');
 }
 for (const input of document.querySelectorAll('input[name=weather]')) {
   input.addEventListener('change', () => { if (input.checked) update({ weather: input.value }); });

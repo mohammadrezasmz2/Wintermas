@@ -1,5 +1,7 @@
 // WebGL renderer for rain streaks. Each drop is a thin quad that fades from tail to head,
 // with soft edges across its width so slanted streaks stay smooth instead of flickering.
+import { maskPrecipitationGl } from './precipitation-mask.js';
+
 const vertexSource = `
 attribute vec4 point;
 uniform vec2 viewport;
@@ -18,17 +20,9 @@ precision highp float;
 #else
 precision mediump float;
 #endif
-uniform vec4 masks[4];
-uniform float scale;
-uniform float canvasHeight;
 varying float alpha;
 varying float side;
 void main() {
-  vec2 p = vec2(gl_FragCoord.x, canvasHeight - gl_FragCoord.y) / scale;
-  for (int i = 0; i < 4; i++) {
-    vec4 r = masks[i];
-    if (p.x >= r.x && p.y >= r.y && p.x < r.z && p.y < r.w) discard;
-  }
   float a = alpha * (1.0 - smoothstep(0.22, 1.0, abs(side)));
   gl_FragColor = vec4(vec3(0.76, 0.85, 0.97) * a, a);
 }
@@ -64,13 +58,10 @@ export function createRainRenderer(canvas) {
 
   const stride = 24; // 6 vertices * (x, y, alpha, side)
   const data = new Float32Array(RAIN_GPU_BUDGET * stride);
-  const masks = new Float32Array(16);
   const buffer = gl.createBuffer();
   const location = gl.getAttribLocation(program, 'point');
   const viewport = gl.getUniformLocation(program, 'viewport');
   const scaleUniform = gl.getUniformLocation(program, 'scale');
-  const heightUniform = gl.getUniformLocation(program, 'canvasHeight');
-  const maskUniform = gl.getUniformLocation(program, 'masks[0]');
   gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
   gl.bufferData(gl.ARRAY_BUFFER, data.byteLength, gl.DYNAMIC_DRAW);
   gl.enableVertexAttribArray(location);
@@ -96,7 +87,6 @@ export function createRainRenderer(canvas) {
       gl.viewport(0, 0, canvas.width, canvas.height);
       gl.uniform2f(viewport, width, height);
       gl.uniform1f(scaleUniform, scale);
-      gl.uniform1f(heightUniform, canvas.height);
       hadDrops = false;
     },
     clear() {
@@ -108,16 +98,6 @@ export function createRainRenderer(canvas) {
       gl.clear(gl.COLOR_BUFFER_BIT);
       hadDrops = drops.length > 0;
       if (!hadDrops) return;
-      masks.fill(0);
-      if (!taskbar) {
-        let i = 0;
-        for (const rect of rectangles) {
-          if (!rect.taskbar) continue;
-          masks.set([rect.left, rect.top - 1, rect.right, rect.bottom], i);
-          if ((i += 4) === masks.length) break;
-        }
-      }
-      gl.uniform4fv(maskUniform, masks);
       const count = Math.min(drops.length, RAIN_GPU_BUDGET);
       const feather = 0.75 / scale;
       for (let i = 0; i < count; i++) {
@@ -137,6 +117,7 @@ export function createRainRenderer(canvas) {
       }
       gl.bufferSubData(gl.ARRAY_BUFFER, 0, data.subarray(0, count * stride));
       gl.drawArrays(gl.TRIANGLES, 0, count * 6);
+      maskPrecipitationGl(gl, rectangles, canvas, scale);
     },
   };
 }
