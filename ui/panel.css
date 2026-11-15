@@ -151,3 +151,13 @@ body.theme-autumn .switch input:checked{background:linear-gradient(90deg,#ba7332
 body.theme-autumn h2::after{background:linear-gradient(90deg,#e9b47344,transparent)}
 body.theme-autumn .palette select,body.theme-autumn .palette option{background:#382c22}
 body.theme-autumn .weather-option:has(input:checked){background:#e2a55e2c;color:#ffe4bc}
+
+/* Compact per-app bottom-edge exclusion list; remains collapsed by default. */
+.app-exclusions{border:1px solid var(--line);border-radius:12px;padding:8px 11px;background:var(--surface)}
+.app-exclusions summary{cursor:pointer;font-size:12px;font-weight:650;color:var(--gold)}
+.app-exclusions label{display:block;color:var(--muted);font-size:11px;margin-top:8px}
+.app-exclusions textarea{box-sizing:border-box;width:100%;resize:vertical;min-height:57px;margin-top:5px;
+  border-radius:9px;border:1px solid var(--line);background:#111d18;color:#f4f7f3;
+  padding:8px 9px;font:12px/1.45 monospace}
+.app-exclusions textarea:focus{outline:1px solid var(--mint)}
+.app-exclusions p{color:var(--muted);font-size:10px;line-height:1.45;margin:5px 0 0}

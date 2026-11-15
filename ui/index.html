@@ -33,6 +33,13 @@
           <label id="taskbar-option" class="switch secondary"><span>Snow on the taskbar</span><input id="taskbar" type="checkbox"></label>
           <label id="icon-weather-option" class="switch secondary"><span id="icon-weather-label">Snow on desktop icons</span><input id="icon-weather" type="checkbox" aria-label="Allow weather accumulation on desktop icons"></label>
         </section>
+        <details class="app-exclusions group" id="bottom-app-controls">
+          <summary>Hide bottom effects in selected apps</summary>
+          <label for="bottom-edge-exclude-apps">Executable names, one per line</label>
+          <textarea id="bottom-edge-exclude-apps" rows="3" spellcheck="false"
+            placeholder="SLDWORKS.exe&#10;Inventor.exe"></textarea>
+          <p>Suppress bottom snow, leaf piles and decorations while these apps are visible. Example: SLDWORKS.exe.</p>
+        </details>
         <section id="snow-actions" class="group" aria-label="Christmas animations">
           <h2>Snow day</h2>
           <div class="actions">
