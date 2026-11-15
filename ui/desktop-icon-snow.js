@@ -67,10 +67,13 @@ export function placeIconSnow(piles, hit, amount = 1) {
   let pile = piles.get(rect.id);
   const n = Math.max(4, rect.contour?.length || ICON_PROFILE_COLUMNS);
   if (!pile || pile.profile.length !== n) {
-    pile = { rect, profile: new Float32Array(n) };
+    // The icon's actual opaque edge is a FIXED anchor. Never derive a new
+    // anchor from an accumulated snow profile or small UIA rescan jitter.
+    const frozenRect = { ...rect, contour: [...rect.contour] };
+    pile = { rect: frozenRect, surface: fixedIconSurface(frozenRect),
+      profile: new Float32Array(n) };
     piles.set(rect.id, pile);
   }
-  pile.rect = rect;
   const index = Math.min(n - 1, Math.max(0,
     Math.floor((hit.x - rect.left) / (rect.right - rect.left) * n)));
   for (const [offset, weight] of [[0, 1.6],[-1,.56],[1,.56],[-2,.22],[2,.22]]) {
@@ -80,14 +83,28 @@ export function placeIconSnow(piles, hit, amount = 1) {
   }
 }
 
+export function fixedIconSurface(icon) {
+  const n = icon.contour?.length || 0;
+  return Array.from({length:n}, (_,i) => iconContactY(icon,
+    icon.left + (i+.5) * (icon.right-icon.left) / n));
+}
+
 export function iconRectChanged(a, b) {
   if (!a || !b) return true;
-  if (Math.abs(a.left - b.left) > 2 || Math.abs(a.top - b.top) > 2 ||
-    Math.abs(a.right - b.right) > 2 || Math.abs(a.bottom - b.bottom) > 2) return true;
+  // Explorer accessibility geometry can fluctuate by 1-4 pixels even though
+  // the real desktop shortcut has not moved. Compare to the *original*
+  // frozen rectangle; accumulate displacement rather than chasing samples.
+  const delta = Math.max(Math.abs(a.left-b.left),Math.abs(a.top-b.top),
+    Math.abs(a.right-b.right),Math.abs(a.bottom-b.bottom));
+  if (delta >= 5.5) return true;
   if (a.contour?.length !== b.contour?.length) return true;
-  for (let i = 0; i < a.contour.length; i++)
-    if (a.contour[i] !== b.contour[i]) return true;
-  return false;
+  let substantial=0;
+  for (let i=0;i<a.contour.length;i++) {
+    const previous=a.contour[i], current=b.contour[i];
+    if ((previous<0)!==(current<0) || (previous>=0 && current>=0 &&
+        Math.abs(previous-current)>60)) substantial++;
+  }
+  return substantial>Math.max(4,Math.floor(a.contour.length*.28));
 }
 
 export function syncIconSnow(piles, icons, onDisplaced) {
@@ -99,14 +116,16 @@ export function syncIconSnow(piles, icons, onDisplaced) {
       onDisplaced?.(pile);
       piles.delete(id);
       changed = true;
-    } else pile.rect = next;
+    }
+    // Intentional: do NOT set pile.rect = next. The frozen contact
+    // coordinates keep snow stationary while Explorer's UIA bounds jitter.
   }
   return changed;
 }
 
 // Split at alpha gaps or steep silhouette changes so a snow cap never draws
 // a straight vertical wall down a folder side or through a logo notch.
-export function snowCapSegments(rect, profile) {
+export function snowCapSegments(rect, profile, fixedSurface = null) {
   const cell = (rect.right - rect.left) / profile.length;
   if (!(cell > 0)) return [];
   const maxStep = Math.min(4.3, Math.max(2, cell * 1.3));
@@ -118,7 +137,8 @@ export function snowCapSegments(rect, profile) {
   };
   for (let i = 0; i < profile.length; i++) {
     const depth = profile[i];
-    const y = iconContactY(rect, rect.left + (i + .5) * cell);
+    const y = fixedSurface ? fixedSurface[i] :
+      iconContactY(rect, rect.left + (i + .5) * cell);
     if (!(depth >= .8) || y === null) { flush(); continue; }
     if (current.length && Math.abs(current[current.length - 1].y - y) > maxStep)
       flush();
@@ -153,8 +173,8 @@ function curvedLine(ctx, points) {
 }
 
 export function paintIconSnow(ctx, piles, now = 0) {
-  for (const {rect, profile} of piles.values()) {
-    const segments=snowCapSegments(rect, profile);
+  for (const {rect, profile, surface} of piles.values()) {
+    const segments=snowCapSegments(rect, profile, surface);
     for (const segment of segments) {
       const top=segment.map(p=>({x:p.x,y:p.y-p.depth}));
       const bottom=segment.slice().reverse().map(p=>({x:p.x,y:p.y-0.15}));

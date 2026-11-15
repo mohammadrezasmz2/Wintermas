@@ -205,10 +205,12 @@ static class DesktopIcons {
                     } catch { /* UIA may not provide an accessible label */ }
                     int maxSide = Math.Max(32, Math.Min(112, (int)area.Width - 8));
                     int side = Math.Max(32, Math.Min(maxSide,
-                        (int)Math.Round(labelTop - area.Top - 9)));
+                        (int)Math.Round(labelTop - area.Top - 18)));
                     double left = area.Left + (area.Width - side) / 2;
-                    double top = Math.Max(area.Top + 3,
-                        Math.Min(area.Top + 12, labelTop - side - 8));
+                    // Align the image bottom a little ABOVE the text. The
+                    // previous "area.Top + 8" pinned the snow too high on
+                    // large desktop icons and left a visible air gap.
+                    double top = Math.Max(area.Top + 3, labelTop - side - 4);
                     bool imageBoundsConfirmed = false;
                     try {
                         var image = element.FindFirst(TreeScope.Descendants,
@@ -232,9 +234,26 @@ static class DesktopIcons {
                     // If the precise image rectangle is absent, deliberately
                     // keep the estimated rim near the TOP of the icon cell.
                     // Never infer a deep pixel contour from this uncertain box.
-                    if (!imageBoundsConfirmed) top = Math.Min(top, area.Top + 8);
+                    if (!imageBoundsConfirmed) {
+                        // Keep fallback bounds relative to the LABEL, not to
+                        // the outer ListItem which can be padded variably.
+                        top = Math.Max(area.Top + 3, labelTop - side - 4);
+                    }
+                    // Stable UI Automation runtime ID, not the child index.
+                    // Explorer can reorder ListItems during icon refreshes:
+                    // index IDs would attach old snow to an unrelated icon.
+                    string stableId = i.ToString(CultureInfo.InvariantCulture);
+                    try {
+                        int[] runtime = element.GetRuntimeId();
+                        if (runtime != null && runtime.Length > 0) {
+                            var token = new StringBuilder();
+                            foreach (int part in runtime)
+                                token.Append(part.ToString("X8", CultureInfo.InvariantCulture)).Append('-');
+                            stableId = token.ToString();
+                        }
+                    } catch { /* use index fallback on older Explorer */ }
                     if (count++ > 0) output.Append(',');
-                    output.Append("{\"id\":").Append(i.ToString(CultureInfo.InvariantCulture));
+                    output.Append("{\"id\":\"").Append(stableId).Append("\"");
                     output.Append(",\"left\":").Append((int)Math.Round(left));
                     output.Append(",\"top\":").Append((int)Math.Round(top));
                     output.Append(",\"right\":").Append((int)Math.Round(left + side));

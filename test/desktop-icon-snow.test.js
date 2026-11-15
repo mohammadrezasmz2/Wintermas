@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { iconContactY, iconSnowLanding, iconObscuredByWindow,
   preferIconHit, placeIconSnow, syncIconSnow, snowCapSegments,
-  iconUpperContour,
+  iconUpperContour, iconRectChanged, fixedIconSurface,
   createIconDragMonitor, ICON_SNOW_MAX_DEPTH }
   from '../ui/desktop-icon-snow.js';
 
@@ -125,4 +125,39 @@ test('snow contact is outside icon artwork with no deep interior tracing',()=>{
   const c=iconContactY(icon,65);
   const raw=icon.top+(icon.bottom-icon.top)*icon.contour[Math.floor((65-icon.left)/(icon.right-icon.left)*24)]/1000;
   assert.ok(c<raw,'snow touches the top edge from outside the image');
+});
+
+test('idle UI Automation jitter does not make the snow bank creep upward',()=>{
+  const banks=new Map(), hit=iconSnowLanding([icon],[],65,38,65,96);
+  placeIconSnow(banks,hit);
+  const pile=banks.get(icon.id), originalRect=pile.rect;
+  const before=pile.surface.slice(), mass=pile.profile.reduce((n,d)=>n+d,0);
+  let released=0;
+  for(let n=0;n<70;n++) {
+    const jitter=(n%7-3)*.62;
+    const shifted={...icon,top:icon.top+jitter,bottom:icon.bottom+jitter,
+      left:icon.left+jitter,right:icon.right+jitter,
+      contour:icon.contour.map((v,i)=>v+((n+i)%3-1)*3)};
+    assert.equal(iconRectChanged(originalRect,shifted),false);
+    assert.equal(syncIconSnow(banks,[shifted],()=>released++),false);
+    placeIconSnow(banks,{icon:shifted,x:65+jitter,y:56+jitter},0.1);
+    assert.strictEqual(banks.get(icon.id).rect,originalRect,
+      'the accumulated snow retains its INITIAL anchor');
+    assert.deepEqual(banks.get(icon.id).surface,before,
+      'surface never changes from repeated UIA samples');
+  }
+  assert.equal(released,0);
+  assert.ok(banks.get(icon.id).profile.reduce((n,d)=>n+d,0)>mass);
+  assert.deepEqual(fixedIconSurface(originalRect), before);
+});
+
+test('real icon drag releases the fixed bank exactly once',()=>{
+  const banks=new Map(), hit=iconSnowLanding([icon],[],65,38,65,96);
+  placeIconSnow(banks,hit);
+  let released=0;
+  const next={...icon,left:icon.left+7,right:icon.right+7};
+  assert.equal(iconRectChanged(icon,next),true);
+  assert.equal(syncIconSnow(banks,[next],()=>released++),true);
+  assert.equal(syncIconSnow(banks,[next],()=>released++),false);
+  assert.equal(released,1);
 });

@@ -11,7 +11,9 @@ test('desktop icon positions and silhouette are read safely without process inje
  assert.match(native,/GetPixel\(x, y\)\.A >= 85/);
  assert.match(native,/ControlType\.Image/);
  assert.match(native,/ControlType\.Text/);
- assert.match(native,/labelTop - side - 8/);
+ assert.match(native,/labelTop - side - 4/);
+ assert.match(native,/element\.GetRuntimeId\(\)/);
+ assert.match(native,/stableId = token\.ToString\(\)/);
  assert.match(native,/new Thread\(delegate\(\) \{/);
  assert.match(native,/Interlocked\.CompareExchange/);
  assert.doesNotMatch(native,/VirtualAllocEx|WriteProcessMemory|OpenProcess\(/);
