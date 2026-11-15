@@ -9,6 +9,10 @@ test('desktop icon positions and silhouette are read safely without process inje
  assert.match(native,/AutomationElement\.FromHandle\(listView\)/);
  assert.match(native,/SHGetFileInfo\(/);
  assert.match(native,/GetPixel\(x, y\)\.A >= 85/);
+ assert.match(native,/ControlType\.Image/);
+ assert.match(native,/GetSystemMetrics\(11\)/);
+ assert.match(native,/new Thread\(delegate\(\) \{/);
+ assert.match(native,/Interlocked\.CompareExchange/);
  assert.doesNotMatch(native,/VirtualAllocEx|WriteProcessMemory|OpenProcess\(/);
  assert.match(source,/DesktopIcons\.Snapshot\(\)/);
  assert.match(build,/DesktopIcons\.cs/);

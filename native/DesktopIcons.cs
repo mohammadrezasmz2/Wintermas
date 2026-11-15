@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Windows.Automation;
 
 // Query Windows Explorer through UI Automation and normal Shell icon APIs.
@@ -32,6 +33,8 @@ static class DesktopIcons {
     delegate bool WindowCallback(IntPtr hwnd, IntPtr extra);
     [DllImport("user32.dll")]
     static extern bool DestroyIcon(IntPtr icon);
+    [DllImport("user32.dll")]
+    static extern int GetSystemMetrics(int metric);
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     struct SHFILEINFO {
@@ -151,18 +154,31 @@ static class DesktopIcons {
         return contour;
     }
 
-    public static string Snapshot() {
-        if (DateTime.UtcNow < nextScan) return cached;
-        nextScan = DateTime.UtcNow.AddMilliseconds(1400);
+    static int scanning = 0;
+    public static string Snapshot(bool pointerPressed) {
+        if (DateTime.UtcNow >= nextScan &&
+            Interlocked.CompareExchange(ref scanning, 1, 0) == 0) {
+            // Keep slow UI Automation work OUT of the 8ms native pointer
+            // sampling loop; otherwise Explorer scanning stalls drag updates.
+            nextScan = DateTime.UtcNow.AddMilliseconds(pointerPressed ? 340 : 850);
+            new Thread(delegate() {
+                try { Refresh(); }
+                finally { Interlocked.Exchange(ref scanning, 0); }
+            }) { IsBackground = true }.Start();
+        }
+        return cached;
+    }
+
+    static void Refresh() {
         try {
             var listView = DesktopView();
-            if (listView == IntPtr.Zero) { cached = "[]"; return cached; }
+            if (listView == IntPtr.Zero) { cached = "[]"; return; }
             RefreshFilePaths();
             var root = AutomationElement.FromHandle(listView);
-            if (root == null) return cached;
+            if (root == null) return;
             var items = root.FindAll(TreeScope.Children,
                 new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ListItem));
-            if (items == null) return cached;
+            if (items == null) return;
             var output = new StringBuilder("[");
             int count = 0;
             for (int i = 0; i < items.Count && count < 256; i++) {
@@ -170,12 +186,35 @@ static class DesktopIcons {
                     var element = items[i];
                     var area = element.Current.BoundingRectangle;
                     if (area.IsEmpty || area.Width < 22 || area.Height < 30) continue;
-                    // UIA bounds include the LABEL. The snow contact shape
-                    // covers only the centered upper icon, not the label.
-                    int side = Math.Max(24, Math.Min(70,
-                        Math.Min((int)area.Width - 6, (int)Math.Round(area.Height * .52))));
+                    // UIA ListItem bounds include icon + label, and the icon
+                    // is often vertically centered DOWN inside that cell.
+                    // The previous top+2 approximation drew snow dozens of
+                    // pixels above the image on 125%/200% scaled desktops.
+                    // Shell desktop icons normally use SHIL_EXTRALARGE
+                    // (48 logical pixels, scaled with DPI), not a fixed 70px.
+                    int side = Math.Max(24, Math.Min((int)area.Width - 6,
+                        (int)Math.Round(GetSystemMetrics(11) * 1.5)));
                     double left = area.Left + (area.Width - side) / 2;
-                    double top = area.Top + 2;
+                    double top = area.Top + Math.Max(2,
+                        Math.Min(65, area.Height - side - 26));
+                    // Prefer an actual accessibility Image child when Explorer
+                    // exposes one; it gives the displayed pixels' exact box.
+                    try {
+                        var image = element.FindFirst(TreeScope.Children,
+                            new PropertyCondition(AutomationElement.ControlTypeProperty,
+                                ControlType.Image));
+                        if (image != null) {
+                            var actual = image.Current.BoundingRectangle;
+                            if (!actual.IsEmpty && actual.Width >= 20 &&
+                                actual.Height >= 20 &&
+                                actual.Width <= area.Width + 2 &&
+                                actual.Height <= area.Height + 2) {
+                                left = actual.Left;
+                                top = actual.Top;
+                                side = (int)Math.Round(Math.Min(actual.Width, actual.Height));
+                            }
+                        }
+                    } catch { /* accessibility providers vary across Windows releases */ }
                     if (count++ > 0) output.Append(',');
                     output.Append("{\"id\":").Append(i.ToString(CultureInfo.InvariantCulture));
                     output.Append(",\"left\":").Append((int)Math.Round(left));
@@ -197,6 +236,5 @@ static class DesktopIcons {
             // Explorer may restart or accessibility queries may be unavailable.
             // Preserve the previous snapshot until the next successful scan.
         }
-        return cached;
     }
 }

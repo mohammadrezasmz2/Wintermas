@@ -19,7 +19,7 @@ import { ploughBaselineForFloor, santaCenterForFloor, safeBottomFloor } from './
 import { snowDiameter, powderShares, setVisibleSnowDiameter } from './snow-diameter.js';
 import { dropTreeAt, fallTree } from './tree-physics.js';
 import { iconContactY, iconSnowLanding, preferIconHit, placeIconSnow,
-  syncIconSnow, paintIconSnow } from './desktop-icon-snow.js';
+  syncIconSnow, paintIconSnow, createIconDragMonitor } from './desktop-icon-snow.js';
 
 const canvas = document.querySelector('canvas');
 const ctx = canvas.getContext('2d');
@@ -44,6 +44,7 @@ let rectangles = [], mouse = { x: -1000, y: -1000 }, particles = [], accents = [
 let taskbars = [];
 let desktopIcons = [];
 const iconPiles = new Map();
+const iconDrag = createIconDragMonitor();
 let ground, plough, snowReady = false;
 let nextAutoPloughCheck = 0, lastPloughAt = -60_000;
 let lastDesktopSample;
@@ -107,6 +108,7 @@ function applyWeather(before, next) {
   fraction = 0;
   piles.clear();
   iconPiles.clear();
+  iconDrag.reset();
   movingWindowDrag = undefined;
   movingWindowHoldUntil.clear();
   if (ground) {
@@ -140,6 +142,7 @@ function resize() {
   rain.resize(width, height, particleScale);
   autumn.resize(width, height);
   iconPiles.clear();
+  iconDrag.reset();
   sceneDirty = true;
   const rect = { id: 'ground', left: 0, right: width, top: height, bottom: height + 1 };
   ground = { rect, profile: new Float32Array(Math.ceil(width / column)), kind: 'snow' };
@@ -252,6 +255,15 @@ function desktop(frame) {
   const elapsed = Math.max(0.012, (now - (lastDesktopSample ?? now)) / 1000);
   lastDesktopSample = now;
   if (placement || geometryChanged(rectangles, frame.rectangles)) sceneDirty = true;
+  if (settings.weather === 'snow' && frame.mouse) {
+    if (iconDrag.update(frame.mouse, desktopIcons, rectangles, now, id => {
+      const pile = iconPiles.get(id);
+      if (pile) {
+        releaseIconBank(pile);
+        iconPiles.delete(id);
+      }
+    })) sceneDirty = true;
+  }
   rectangles = frame.rectangles;
   taskbars = rectangles.filter(rect => rect.taskbar);
   // Desktop shortcuts have their own tiny silhouette-following snowbanks.
@@ -428,6 +440,8 @@ function updateParticles(dt) {
     }
   }
   const byId = new Map(rectangles.map(rect => [rect.id, rect]));
+  const landableIcons = desktopIcons.filter(icon =>
+    !iconDrag.isBlocked(icon.id, performance.now()));
   const wind = settings.wind * 0.62;
   // In-place compaction: same rules as before, without a new array and motion object every frame.
   let kept = 0;
@@ -437,7 +451,7 @@ function updateParticles(dt) {
     snowStepInPlace(p, wind + p.vx, dt * ((settings.snowSpeed ?? 100) / 100));
     const hit = p.foreground ? null : preferIconHit(
       landing(rectangles, x0, y0, p.x, p.y, settings.taskbar),
-      iconSnowLanding(desktopIcons, rectangles, x0, y0, p.x, p.y));
+      iconSnowLanding(landableIcons, rectangles, x0, y0, p.x, p.y));
     if (hit) {
       if (hit.icon) placeIconSnow(iconPiles, hit);
       else addPile(hit);
@@ -491,7 +505,7 @@ function updateParticles(dt) {
         ? rectangles.filter(rect => rect.id !== p.avoidId) : rectangles;
       const hit = preferIconHit(
         landing(landingRects, x0, y0, p.x, p.y, settings.taskbar),
-        iconSnowLanding(desktopIcons, landingRects, x0, y0, p.x, p.y));
+        iconSnowLanding(landableIcons, landingRects, x0, y0, p.x, p.y));
       const surface = hit ?? (p.y >= height ? { rect: bottomSurfaceAt(p.x), x: p.x } : null);
       if (!surface) return true;
       if (surface.icon) placeIconSnow(iconPiles, surface, p.deposit / 3.42);
@@ -1334,6 +1348,7 @@ wintermas.onAction(action => {
   } else if (action === 'reset') {
     piles.clear();
     iconPiles.clear();
+    iconDrag.reset();
     movingWindowDrag = undefined;
     movingWindowHoldUntil.clear();
     ground.profile.fill(0);

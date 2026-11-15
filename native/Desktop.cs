@@ -120,7 +120,7 @@ static class Desktop {
                 ",\"moving\":" + movingWindow +
                 ",\"minimized\":[" + string.Join(",", minimized) + "]" +
                 ",\"windows\":[" + string.Join(",", windows) + "]" +
-                ",\"icons\":" + DesktopIcons.Snapshot() + "}";
+                ",\"icons\":" + DesktopIcons.Snapshot(pressed) + "}";
             Point cursor;
             GetCursorPos(out cursor);
             int now = Environment.TickCount;

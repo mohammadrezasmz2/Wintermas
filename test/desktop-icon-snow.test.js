@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { iconContactY, iconSnowLanding, iconObscuredByWindow,
-  preferIconHit, placeIconSnow, syncIconSnow, ICON_SNOW_MAX_DEPTH }
+  preferIconHit, placeIconSnow, syncIconSnow, snowCapSegments,
+  createIconDragMonitor, ICON_SNOW_MAX_DEPTH }
   from '../ui/desktop-icon-snow.js';
 
 const rect={ id:'desktop-icon-2', left:40, top:50, right:88, bottom:98,
@@ -63,4 +64,45 @@ test('desktop icons without a valid alpha column cannot cause a phantom ridge',(
  const banks=new Map();
  placeIconSnow(banks,{icon:empty,x:65,y:55});
  assert.equal(banks.get(empty.id).profile.reduce((a,b)=>a+b,0),0);
+});
+
+test('snow forms smooth rounded continuous caps, not thin vertical comb teeth',()=>{
+  const bank={...icon,contour:Array(24).fill(120)};
+  const depth=new Float32Array(24).fill(6);
+  const caps=snowCapSegments(bank,depth);
+  assert.equal(caps.length,1,'a uniform folder rim produces one connected ridge');
+  assert.equal(caps[0].length,24);
+  const differences=caps[0].slice(1).map((p,i)=>Math.abs(p.depth-caps[0][i].depth));
+  assert.ok(Math.max(...differences)<3,'shoulders taper without sawtooth spikes');
+  assert.ok(caps[0][0].depth<caps[0][5].depth,'left shoulder is rounded');
+  assert.ok(caps[0][23].depth<caps[0][12].depth,'right shoulder is rounded');
+});
+test('sharp icon alpha steps and transparent gaps produce separate caps, not tall walls',()=>{
+  const stepped={...icon,contour:Array.from({length:24},(_,i)=>
+    i>=10&&i<13?-1:i<10?100:680)};
+  const caps=snowCapSegments(stepped,new Float32Array(24).fill(6));
+  assert.equal(caps.length,2,'do not bridge a transparent artwork notch');
+  assert.ok(caps.every(c=>c.every((p,i)=>!i||Math.abs(p.y-c[i-1].y)<5)));
+});
+test('a small cursor movement immediately shakes icon powder off without awaiting Explorer',()=>{
+  const drag=createIconDragMonitor(), banks=new Map(), hit=iconSnowLanding([icon],[],65,38,65,96);
+  placeIconSnow(banks,hit);
+  const drop=id=>{banks.delete(id)};
+  drag.update({x:65,y:68,pressed:true},[icon],[],100,drop);
+  assert.equal(banks.size,1,'merely pressing the icon does not remove snow');
+  drag.update({x:67,y:70,pressed:true},[icon],[],118,drop);
+  assert.equal(banks.size,1);
+  assert.equal(drag.update({x:77,y:72,pressed:true},[icon],[],135,drop),true);
+  assert.equal(banks.size,0);
+  assert.equal(drag.isBlocked(icon.id,200),true);
+  drag.update({x:77,y:72,pressed:false},[icon],[],150,drop);
+  assert.equal(drag.isBlocked(icon.id,1000),false);
+});
+test('clicking through a covering application cannot shake hidden desktop snow',()=>{
+  const drag=createIconDragMonitor();
+  const cover={left:0,top:0,right:300,bottom:400};
+  const calls=[];
+  drag.update({x:65,y:68,pressed:true},[icon],[cover],100,id=>calls.push(id));
+  assert.equal(drag.update({x:77,y:72,pressed:true},[icon],[cover],130,id=>calls.push(id)),false);
+  assert.deepEqual(calls,[]);
 });
