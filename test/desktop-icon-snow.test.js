@@ -82,7 +82,7 @@ test('sharp icon alpha steps and transparent gaps produce separate caps, not tal
   const stepped={...icon,contour:Array.from({length:24},(_,i)=>
     i>=10&&i<13?-1:i<10?100:680)};
   const caps=snowCapSegments(stepped,new Float32Array(24).fill(6));
-  assert.equal(caps.length,2,'do not bridge a transparent artwork notch');
+  assert.equal(caps.length,1,'only the upper crest collects; the deep lower region stays clear');
   assert.ok(caps.every(c=>c.every((p,i)=>!i||Math.abs(p.y-c[i-1].y)<5)));
 });
 test('a small cursor movement immediately shakes icon powder off without awaiting Explorer',()=>{
