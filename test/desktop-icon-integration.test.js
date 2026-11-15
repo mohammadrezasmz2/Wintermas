@@ -12,7 +12,7 @@ test('desktop icon positions and silhouette are read safely without process inje
  assert.doesNotMatch(native,/VirtualAllocEx|WriteProcessMemory|OpenProcess\(/);
  assert.match(source,/DesktopIcons\.Snapshot\(\)/);
  assert.match(build,/DesktopIcons\.cs/);
- assert.match(build,/UIAutomationClient\.dll/);
+ assert.match(build,/frameworkAssembly\('UIAutomationClient'\)/);
 });
 
 test('Electron forwards icon bounds and only alpha profiles to each display',async()=>{
