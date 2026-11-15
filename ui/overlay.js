@@ -12,7 +12,7 @@ import { createPerfMonitor } from './perf-monitor.js';
 import { clipPrecipitation } from './precipitation-mask.js';
 import { shedOnWindowMotion, naturalSnowHeights, keepBallAboveTaskbar, canStackBall, needsAutoPlough, sweepSnowProfile, bladeTouchesBall } from './snow-behavior.js';
 import { santaStops, bladeCrosses, isOnBottomSurface } from './santa-visit.js';
-import { shouldSpillMinimizedPile } from './window-snow.js';
+import { shouldReleaseWindowSnow } from './window-snow.js';
 import { shakeSnowOffWindow } from './window-powder.js';
 import { titlebarWindowAt, draggedEnough, hideMovingWindowSnow } from './window-drag.js';
 import { ploughBaselineForFloor, santaCenterForFloor, safeBottomFloor } from './taskbar-actors.js';
@@ -244,10 +244,13 @@ function desktop(frame) {
     if (pile.rect.taskbar && (!settings.taskbar || settings.paused)) {
       piles.delete(id);
     } else if (!next) {
-      // Closed windows lose snow; minimized windows drop it into the desktop.
-      if (shouldSpillMinimizedPile(id, frame.minimized)) spill(pile, id);
+      // A disappearing window must NEVER take its accumulated snow with it.
+      // Release its last visible bank into independent particles first, then
+      // delete the now-invalid HWND pile. Includes both Close and Minimize.
+      if (shouldReleaseWindowSnow(pile, next, settings)) spill(pile, id);
       piles.delete(id);
       movingWindowHoldUntil.delete(id);
+      sceneDirty = true;
     } else {
       pile.lastSeen = now;
       const old = pile.rect;
