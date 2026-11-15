@@ -256,7 +256,8 @@ function broadcastGeometry(windows, pressed, control, minimized = [], moving = n
       const bottom = (icon.bottom - origin.y) / scale;
       if (right > 0 && bottom > 0 && left < width && top < height) {
         desktopIcons.push({ id: 'desktop-icon-' + icon.id,
-          left, top, right, bottom, contour: icon.contour });
+          left, top, right, bottom, contour: icon.contour,
+          trusted: icon.trusted === true });
       }
     }
     send(win, 'desktop', { rectangles, icons: desktopIcons, minimized, moving,

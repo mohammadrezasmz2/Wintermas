@@ -26,12 +26,15 @@ export function iconContactY(icon, x) {
   if (crest === null || !Number.isFinite(sample) || sample < 0 || sample > 1000) return null;
   const h = icon.bottom - icon.top;
   const drop = (sample - crest) * h / 1000;
-  // Only the outer top silhouette can accumulate. Never trace interior gaps,
-  // image highlights or icons' internal artwork as if they were snowy surfaces.
-  if (drop > Math.min(16, Math.max(12, h * .16)) + 0.01) return null;
-  // Keep the contact just *above* opaque icon pixels to avoid a white slash
-  // inside the app image on high-DPI screens.
-  return icon.top + h * sample / 1000 - 1.1;
+  // Shell art sometimes has tall corners, deep logo cutouts and diagonal
+  // shoulders.  The old 12-16px tolerance painted those *interior* features
+  // and made a jagged snow crown on Recycle Bin and 3D app icons.
+  const limit = icon.trusted === false ? 1.8 : Math.min(5.5, Math.max(3.5, h * .065));
+  if (drop < -.2 || drop > limit) return null;
+  // Stay outside the top visible pixels with a shallow, curved support line.
+  // Never let an alpha notch pull a snow cap far down into an application logo.
+  const topCrest = icon.top + h * crest / 1000 - 1.6;
+  return topCrest + Math.min(2.4, drop * .52);
 }
 
 export function iconObscuredByWindow(windows, x, y) {
@@ -78,7 +81,7 @@ export function placeIconSnow(piles, hit, amount = 1) {
     Math.floor((hit.x - rect.left) / (rect.right - rect.left) * n)));
   for (const [offset, weight] of [[0, 1.6],[-1,.56],[1,.56],[-2,.22],[2,.22]]) {
     const i = index + offset;
-    if (i < 0 || i >= n || rect.contour[i] < 0) continue;
+    if (i < 0 || i >= n || !Number.isFinite(pile.surface[i])) continue;
     pile.profile[i] = Math.min(ICON_SNOW_MAX_DEPTH, pile.profile[i] + amount * weight);
   }
 }
@@ -128,11 +131,12 @@ export function syncIconSnow(piles, icons, onDisplaced) {
 export function snowCapSegments(rect, profile, fixedSurface = null) {
   const cell = (rect.right - rect.left) / profile.length;
   if (!(cell > 0)) return [];
-  const maxStep = Math.min(4.3, Math.max(2, cell * 1.3));
+  const maxStep = Math.min(2.7, Math.max(1.4, cell * 0.85));
   const segments = [];
   let current = [];
   const flush = () => {
-    if (current.length >= 3) segments.push(current);
+    // Short fragments look like icy spikes rather than an organic snow cap.
+    if (current.length >= 5) segments.push(current);
     current = [];
   };
   for (let i = 0; i < profile.length; i++) {
@@ -146,8 +150,8 @@ export function snowCapSegments(rect, profile, fixedSurface = null) {
   }
   flush();
   return segments.map(segment => {
-    // Preserve the real contact edge but remove pixel-scale jaggies from the
-    // snow TOP. Restrict rise at both ends to make rounded pile shoulders.
+    // Preserve the calibrated, shallow outer contact edge but remove
+    // pixel-scale jaggies from the snow TOP. Round both ends gently.
     return segment.map((point, i) => {
       const a = segment[Math.max(0, i - 2)].depth;
       const b = segment[Math.max(0, i - 1)].depth;

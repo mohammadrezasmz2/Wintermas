@@ -21,6 +21,8 @@ static class DesktopIcons {
     static readonly Dictionary<string, int[]> contourCache =
         new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);
     static DateTime nextFileRefresh = DateTime.MinValue;
+    static readonly HashSet<string> shapeQualityCache =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     static extern IntPtr FindWindow(string className, string title);
@@ -35,6 +37,38 @@ static class DesktopIcons {
     static extern bool DestroyIcon(IntPtr icon);
     [DllImport("user32.dll")]
     static extern int GetSystemMetrics(int metric);
+    [DllImport("user32.dll")]
+    static extern uint GetDpiForWindow(IntPtr hwnd);
+
+    // Explorer desktop uses the shell EXTRALARGE image list (normally 48
+    // logical pixels), not SHGFI_LARGEICON's ordinary 32px system bitmap.
+    // Use actual stock icons for virtual shell entries like Recycle Bin.
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct SHSTOCKICONINFO {
+        public uint cbSize;
+        public IntPtr hIcon;
+        public int iSysImageIndex;
+        public int iIcon;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+        public string szPath;
+    }
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    static extern int SHGetStockIconInfo(int stockId, uint flags, ref SHSTOCKICONINFO info);
+
+    static IntPtr StockIconForName(string name) {
+        string lowered = name.ToLowerInvariant();
+        // Stock icon IDs: SIID_RECYCLER = 31; SIID_DESKTOPPC = 94.
+        int kind = lowered.Contains("recycle bin") || lowered.Contains("سطل بازیافت") ? 31 :
+            lowered == "this pc" || lowered.Contains("این رایانه") ? 94 : -1;
+        if (kind < 0) return IntPtr.Zero;
+        var info = new SHSTOCKICONINFO();
+        info.cbSize = (uint)Marshal.SizeOf(typeof(SHSTOCKICONINFO));
+        try {
+            // SHGSI_ICON (0x100) + SHGSI_SHELLICONSIZE (0x4)
+            if (SHGetStockIconInfo(kind, 0x104, ref info) == 0) return info.hIcon;
+        } catch { /* unsupported shell or transient Explorer restart */ }
+        return IntPtr.Zero;
+    }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     struct SHFILEINFO {
@@ -93,64 +127,84 @@ static class DesktopIcons {
     // Profile samples mark the FIRST opaque pixel in each vertical icon strip,
     // normalized to 0..1000; -1 means fully transparent space.
     static int[] FallbackContour(string name) {
+        // When Explorer does not expose an icon and no real Shell artwork
+        // can be retrieved, NEVER fake an arch deep into a file or shortcut.
+        // Draw only a shallow horizontal crest near the top of its image box;
+        // leave transparent margins clear. No guessed internal "surfaces".
         var values = new int[Columns];
-        string lower = name.ToLowerInvariant();
-        bool folder = lower.Contains("folder") || lower.Contains("پوشه");
-        bool recycle = lower.Contains("recycle") || lower.Contains("bin");
         for (int i = 0; i < Columns; i++) {
             double t = (i + .5) / Columns;
-            double arc = Math.Sqrt(Math.Max(0, 1 - Math.Pow(2*t-1, 2)));
-            // Folders are largely flat with a short raised tab; file icons
-            // vary in their top shape, round icons have arched shoulders.
-            double y = folder ? (t < .34 ? .10 : .24) :
-                recycle ? (.12 + .19 * (1 - arc)) :
-                (.07 + .34 * (1 - arc));
-            values[i] = (int)Math.Round(y * 1000);
+            values[i] = t < .11 || t > .89 ? -1 : 55;
         }
         return values;
     }
 
-    static int[] ReadShape(string name) {
+    static int[] SampleIcon(IntPtr handle, int[] fallback) {
+        if (handle == IntPtr.Zero) return fallback;
+        using (var icon = Icon.FromHandle(handle))
+        using (var image = icon.ToBitmap()) {
+            var sampled = new int[Columns];
+            int opaqueBands = 0;
+            for (int i = 0; i < Columns; i++) {
+                int first = -1;
+                int from = Math.Max(0, (i * image.Width) / Columns);
+                int to = Math.Min(image.Width,
+                    ((i + 1) * image.Width + Columns - 1) / Columns);
+                for (int y = 0; y < image.Height; y++) {
+                    bool visible = false;
+                    for (int x = from; x < to; x++) {
+                        if (image.GetPixel(x, y).A >= 110) {
+                            visible = true; break;
+                        }
+                    }
+                    if (visible) { first = y; break; }
+                }
+                sampled[i] = first < 0 ? -1 :
+                    (int)Math.Round(first * 1000.0 / image.Height);
+                if (first >= 0) opaqueBands++;
+            }
+            return opaqueBands >= 5 ? sampled : fallback;
+        }
+    }
+
+    static int[] ReadShape(string name, out bool accurate) {
+        accurate = false;
         string path;
-        if (!desktopFiles.TryGetValue(name, out path)) return FallbackContour(name);
+        bool hasPath = desktopFiles.TryGetValue(name, out path);
+        string cacheKey = hasPath ? path : "$shell:" + name;
         int[] known;
-        if (contourCache.TryGetValue(path, out known)) return known;
-        int[] contour = FallbackContour(name);
-        SHFILEINFO info;
+        if (contourCache.TryGetValue(cacheKey, out known)) {
+            accurate = shapeQualityCache.Contains(cacheKey);
+            return known;
+        }
+        int[] fallback = FallbackContour(name);
+        int[] contour = fallback;
         IntPtr handle = IntPtr.Zero;
         try {
-            uint flags = 0x100 /* SHGFI_ICON */ | 0x0 /* SHGFI_LARGEICON */;
-            SHGetFileInfo(path, 0, out info,
-                (uint)Marshal.SizeOf(typeof(SHFILEINFO)), flags);
-            handle = info.hIcon;
-            if (handle != IntPtr.Zero) {
-                using (var icon = Icon.FromHandle(handle))
-                using (var image = icon.ToBitmap()) {
-                    var sampled = new int[Columns];
-                    int opaqueBands = 0;
-                    for (int i = 0; i < Columns; i++) {
-                        int first = -1;
-                        int from = Math.Max(0, (i * image.Width) / Columns);
-                        int to = Math.Min(image.Width, ((i + 1) * image.Width + Columns - 1) / Columns);
-                        for (int y = 0; y < image.Height; y++) {
-                            bool visible = false;
-                            for (int x = from; x < to; x++) {
-                                if (image.GetPixel(x, y).A >= 85) { visible = true; break; }
-                            }
-                            if (visible) { first = y; break; }
-                        }
-                        sampled[i] = first < 0 ? -1 : (int)Math.Round(first * 1000.0 / image.Height);
-                        if (first >= 0) opaqueBands++;
-                    }
-                    if (opaqueBands >= 5) contour = sampled;
-                }
+            if (hasPath) {
+                SHFILEINFO info;
+                // SHGFI_ICON (0x100) | SHGFI_SHELLICONSIZE (0x4).
+                // Match Explorer's shell icon, not 32px LARGEICON defaults.
+                SHGetFileInfo(path, 0, out info,
+                    (uint)Marshal.SizeOf(typeof(SHFILEINFO)), 0x104);
+                handle = info.hIcon;
+            } else {
+                handle = StockIconForName(name);
             }
-        } catch { /* Shell image extraction is optional: keep a shaped fallback */ }
+            if (handle != IntPtr.Zero) {
+                contour = SampleIcon(handle, fallback);
+                accurate = !Object.ReferenceEquals(contour, fallback);
+            }
+        } catch { /* keep an ultra-shallow fallback instead of drawing on logos */ }
         finally {
             if (handle != IntPtr.Zero) DestroyIcon(handle);
         }
-        if (contourCache.Count > 512) contourCache.Clear();
-        contourCache[path] = contour;
+        if (contourCache.Count > 512) {
+            contourCache.Clear();
+            shapeQualityCache.Clear();
+        }
+        contourCache[cacheKey] = contour;
+        if (accurate) shapeQualityCache.Add(cacheKey);
         return contour;
     }
 
@@ -203,14 +257,23 @@ static class DesktopIcons {
                                 labelTop = bounds.Top;
                         }
                     } catch { /* UIA may not provide an accessible label */ }
-                    int maxSide = Math.Max(32, Math.Min(112, (int)area.Width - 8));
-                    int side = Math.Max(32, Math.Min(maxSide,
-                        (int)Math.Round(labelTop - area.Top - 18)));
+                    // Desktop artwork is from SHIL_EXTRALARGE (48 logical
+                    // pixels, DPI-scaled), not a variable height derived
+                    // from the number of text lines below each shortcut.
+                    uint dpi = 96;
+                    try {
+                        dpi = GetDpiForWindow(listView);
+                        if (dpi < 96 || dpi > 384) dpi = 96;
+                    } catch { dpi = 96; }
+                    int maxSide = Math.Max(32, Math.Min(144, (int)area.Width - 6));
+                    int shellSide = (int)Math.Round(48.0 * dpi / 96.0);
+                    int side = Math.Max(32, Math.Min(maxSide, shellSide));
+                    // Reserve label clearance for two-line filenames as
+                    // well as single-line folder names: same artwork size.
+                    side = Math.Min(side, Math.Max(32,
+                        (int)Math.Round(labelTop - area.Top - 13)));
                     double left = area.Left + (area.Width - side) / 2;
-                    // Align the image bottom a little ABOVE the text. The
-                    // previous "area.Top + 8" pinned the snow too high on
-                    // large desktop icons and left a visible air gap.
-                    double top = Math.Max(area.Top + 3, labelTop - side - 4);
+                    double top = Math.Max(area.Top + 2, labelTop - side - 15);
                     bool imageBoundsConfirmed = false;
                     try {
                         var image = element.FindFirst(TreeScope.Descendants,
@@ -237,7 +300,7 @@ static class DesktopIcons {
                     if (!imageBoundsConfirmed) {
                         // Keep fallback bounds relative to the LABEL, not to
                         // the outer ListItem which can be padded variably.
-                        top = Math.Max(area.Top + 3, labelTop - side - 4);
+                        top = Math.Max(area.Top + 2, labelTop - side - 15);
                     }
                     // Stable UI Automation runtime ID, not the child index.
                     // Explorer can reorder ListItems during icon refreshes:
@@ -259,12 +322,13 @@ static class DesktopIcons {
                     output.Append(",\"right\":").Append((int)Math.Round(left + side));
                     output.Append(",\"bottom\":").Append((int)Math.Round(top + side));
                     output.Append(",\"contour\":[");
-                    int[] shape = ReadShape(element.Current.Name ?? "");
+                    bool reliableShape;
+                    int[] shape = ReadShape(element.Current.Name ?? "", out reliableShape);
                     for (int c = 0; c < Columns; c++) {
                         if (c > 0) output.Append(',');
                         output.Append(shape[c].ToString(CultureInfo.InvariantCulture));
                     }
-                    output.Append("]}");
+                    output.Append("],\"trusted\":").Append(reliableShape ? "true" : "false").Append('}');
                 } catch { /* a deleted or virtualized icon can disappear mid-scan */ }
             }
             output.Append(']');
