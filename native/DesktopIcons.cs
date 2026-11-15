@@ -186,35 +186,53 @@ static class DesktopIcons {
                     var element = items[i];
                     var area = element.Current.BoundingRectangle;
                     if (area.IsEmpty || area.Width < 22 || area.Height < 30) continue;
-                    // UIA ListItem bounds include icon + label, and the icon
-                    // is often vertically centered DOWN inside that cell.
-                    // The previous top+2 approximation drew snow dozens of
-                    // pixels above the image on 125%/200% scaled desktops.
-                    // Shell desktop icons normally use SHIL_EXTRALARGE
-                    // (48 logical pixels, scaled with DPI), not a fixed 70px.
-                    int side = Math.Max(24, Math.Min((int)area.Width - 6,
-                        (int)Math.Round(GetSystemMetrics(11) * 1.5)));
-                    double left = area.Left + (area.Width - side) / 2;
-                    double top = area.Top + Math.Max(2,
-                        Math.Min(65, area.Height - side - 26));
-                    // Prefer an actual accessibility Image child when Explorer
-                    // exposes one; it gives the displayed pixels' exact box.
+                    // UIA ListItem bounds include the LABEL and the cell,
+                    // not just the visible icon. The old fixed 48px guess
+                    // placed snow INSIDE large (96px) desktop icons.
+                    // Reserve space for the label and use the actual Image
+                    // accessibility child when Explorer makes it available.
+                    double labelTop = area.Bottom - 28;
                     try {
-                        var image = element.FindFirst(TreeScope.Children,
+                        var label = element.FindFirst(TreeScope.Descendants,
+                            new PropertyCondition(AutomationElement.ControlTypeProperty,
+                                ControlType.Text));
+                        if (label != null) {
+                            var bounds = label.Current.BoundingRectangle;
+                            if (!bounds.IsEmpty && bounds.Top > area.Top + 35 &&
+                                bounds.Top < area.Bottom)
+                                labelTop = bounds.Top;
+                        }
+                    } catch { /* UIA may not provide an accessible label */ }
+                    int maxSide = Math.Max(32, Math.Min(112, (int)area.Width - 8));
+                    int side = Math.Max(32, Math.Min(maxSide,
+                        (int)Math.Round(labelTop - area.Top - 9)));
+                    double left = area.Left + (area.Width - side) / 2;
+                    double top = Math.Max(area.Top + 3,
+                        Math.Min(area.Top + 12, labelTop - side - 8));
+                    bool imageBoundsConfirmed = false;
+                    try {
+                        var image = element.FindFirst(TreeScope.Descendants,
                             new PropertyCondition(AutomationElement.ControlTypeProperty,
                                 ControlType.Image));
                         if (image != null) {
                             var actual = image.Current.BoundingRectangle;
                             if (!actual.IsEmpty && actual.Width >= 20 &&
-                                actual.Height >= 20 &&
-                                actual.Width <= area.Width + 2 &&
-                                actual.Height <= area.Height + 2) {
+                                actual.Height >= 20 && actual.Width <= area.Width + 2 &&
+                                actual.Height <= area.Height + 2 &&
+                                actual.Top < labelTop &&
+                                actual.Left >= area.Left - 4 &&
+                                actual.Right <= area.Right + 4) {
                                 left = actual.Left;
                                 top = actual.Top;
                                 side = (int)Math.Round(Math.Min(actual.Width, actual.Height));
+                                imageBoundsConfirmed = true;
                             }
                         }
-                    } catch { /* accessibility providers vary across Windows releases */ }
+                    } catch { /* Explorer versions expose different UIA trees */ }
+                    // If the precise image rectangle is absent, deliberately
+                    // keep the estimated rim near the TOP of the icon cell.
+                    // Never infer a deep pixel contour from this uncertain box.
+                    if (!imageBoundsConfirmed) top = Math.Min(top, area.Top + 8);
                     if (count++ > 0) output.Append(',');
                     output.Append("{\"id\":").Append(i.ToString(CultureInfo.InvariantCulture));
                     output.Append(",\"left\":").Append((int)Math.Round(left));

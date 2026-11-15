@@ -77,7 +77,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: v0.2.1-preview.17
+          RELEASE_TAG: v0.2.1-preview.18
         run: |
-          gh release create $env:RELEASE_TAG 'dist/setup/Wintermas-Setup.exe' 'dist/setup/Wintermas-Setup.exe.sha256' --target $env:GITHUB_SHA --title 'Wintermas 0.2.1 Preview 17 — smooth snowcaps on desktop icons' --prerelease --notes 'Preview 17: replaced comb-like spikes with smooth curved snowcaps, improved artwork-only icon bounds using accessibility image rectangles and DPI-aware fallback, and releases snow instantly when an icon is dragged instead of waiting for an Explorer rescan. Uses safe UI Automation and shell icon APIs without Explorer injection. Direct NSIS installer with Windows smoke test and SHA-256 checksum. Direct standard NSIS installer with install smoke test and SHA-256 checksum. IMPORTANT: unsigned preview; do not bypass antivirus warnings.'
+          gh release create $env:RELEASE_TAG 'dist/setup/Wintermas-Setup.exe' 'dist/setup/Wintermas-Setup.exe.sha256' --target $env:GITHUB_SHA --title 'Wintermas 0.2.1 Preview 18 — safer desktop icon snow placement' --prerelease --notes 'Preview 18: corrects desktop icon image placement relative to labels and larger Windows icon sizes; snow only accumulates on upper silhouette, not internal icon artwork such as lettering and monitor displays. Rendering remains deliberately conservative when Explorer cannot expose exact image bounds. Previous instant mouse-drag powder shedding preserved. Uses safe UI Automation and shell icon APIs without Explorer injection. Direct NSIS installer with Windows smoke test and SHA-256 checksum. Direct standard NSIS installer with install smoke test and SHA-256 checksum. IMPORTANT: unsigned preview; do not bypass antivirus warnings.'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

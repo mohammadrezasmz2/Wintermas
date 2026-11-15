@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { iconContactY, iconSnowLanding, iconObscuredByWindow,
   preferIconHit, placeIconSnow, syncIconSnow, snowCapSegments,
+  iconUpperContour,
   createIconDragMonitor, ICON_SNOW_MAX_DEPTH }
   from '../ui/desktop-icon-snow.js';
 
@@ -105,4 +106,23 @@ test('clicking through a covering application cannot shake hidden desktop snow',
   drag.update({x:65,y:68,pressed:true},[icon],[cover],100,id=>calls.push(id));
   assert.equal(drag.update({x:77,y:72,pressed:true},[icon],[cover],130,id=>calls.push(id)),false);
   assert.deepEqual(calls,[]);
+});
+
+test('deep opaque details in a brand logo cannot become snow ledges',()=>{
+  // A desktop icon can have upper decoration plus an internal white logo.
+  // Only the highest silhouette is a physical landing surface.
+  const contour=Array(24).fill(90);
+  contour[8]=740;contour[9]=800;contour[10]=870;
+  const branded={...icon,contour};
+  assert.ok(iconUpperContour(branded)<=100);
+  assert.equal(iconContactY(branded,icon.left+9.5*(icon.right-icon.left)/24),null);
+  assert.equal(iconSnowLanding([branded],[],icon.left+9.5*(icon.right-icon.left)/24,38,
+    icon.left+9.5*(icon.right-icon.left)/24,99),null);
+  const caps=snowCapSegments(branded,new Float32Array(24).fill(5));
+  assert.ok(caps.every(segment=>segment.every(p=>p.y<branded.top+14)));
+});
+test('snow contact is outside icon artwork with no deep interior tracing',()=>{
+  const c=iconContactY(icon,65);
+  const raw=icon.top+(icon.bottom-icon.top)*icon.contour[Math.floor((65-icon.left)/(icon.right-icon.left)*24)]/1000;
+  assert.ok(c<raw,'snow touches the top edge from outside the image');
 });

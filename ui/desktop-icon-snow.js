@@ -3,16 +3,35 @@
 // The bank is drawn as a few smooth, connected pillows rather than 24
 // separate vertical trapezoids (which used to look like a white comb).
 export const ICON_PROFILE_COLUMNS = 24;
-export const ICON_SNOW_MAX_DEPTH = 8.5;
+export const ICON_SNOW_MAX_DEPTH = 6.2;
+
+// An icon's alpha bitmap may contain letters, little holes, and internal
+// details far BELOW its upper silhouette. Those are not snowy ledges. Restrict
+// snow to the highest visible crest, so it cannot run into the middle of
+// Recycle Bin, a monitor screen, or an application's logo.
+export function iconUpperContour(icon) {
+  if (!icon || !Array.isArray(icon.contour)) return null;
+  const ordered = icon.contour.filter(v => Number.isFinite(v) && v >= 0 &&
+    v <= 1000).sort((a,b) => a-b);
+  if (ordered.length < 3) return null;
+  return ordered[Math.floor((ordered.length - 1) * 0.08)];
+}
 
 export function iconContactY(icon, x) {
   if (!icon || !Array.isArray(icon.contour) || icon.contour.length < 4 ||
       icon.right <= icon.left || x < icon.left || x >= icon.right) return null;
   const index = Math.min(icon.contour.length - 1,
     Math.max(0, Math.floor((x - icon.left) / (icon.right - icon.left) * icon.contour.length)));
-  const sample = icon.contour[index];
-  if (!Number.isFinite(sample) || sample < 0 || sample > 1000) return null;
-  return icon.top + (icon.bottom - icon.top) * sample / 1000;
+  const sample = icon.contour[index], crest = iconUpperContour(icon);
+  if (crest === null || !Number.isFinite(sample) || sample < 0 || sample > 1000) return null;
+  const h = icon.bottom - icon.top;
+  const drop = (sample - crest) * h / 1000;
+  // Only the outer top silhouette can accumulate. Never trace interior gaps,
+  // image highlights or icons' internal artwork as if they were snowy surfaces.
+  if (drop > Math.min(16, Math.max(12, h * .16)) + 0.01) return null;
+  // Keep the contact just *above* opaque icon pixels to avoid a white slash
+  // inside the app image on high-DPI screens.
+  return icon.top + h * sample / 1000 - 1.1;
 }
 
 export function iconObscuredByWindow(windows, x, y) {
