@@ -16,9 +16,13 @@
   <img alt="Built with Electron" src="https://img.shields.io/badge/Built%20with-Electron-47848F">
 </p>
 
-**[Download latest Windows preview](https://github.com/mohammadrezasmz2/Wintermas/releases/tag/v0.2.1-preview.14)** · **[Product overview & FAQ](https://designclup.com/wintermas/)** · **[Watch demo](./demo/demo.mp4)** · **[Source for current preview features](https://github.com/mohammadrezasmz2/Wintermas/tree/fix/separate-weather-and-taskbar-art)**
+**[Download latest Windows preview](https://github.com/mohammadrezasmz2/Wintermas/releases/tag/v0.2.1-preview.21)** · **[Product overview & FAQ](https://designclup.com/wintermas/)** · **[Watch demo](./demo/demo.mp4)** · **[Source for current preview features](https://github.com/mohammadrezasmz2/Wintermas/tree/fix/separate-weather-and-taskbar-art)**
 
 Wintermas is a free-to-download, interactive **Windows desktop snowfall, rain and falling-leaves application**. Weather effects surround your existing windows instead of replacing your wallpaper. Snow settles on window ledges; autumn leaves accumulate in piles; snowballs, snowmen, Santa Claus and seasonal decorations make the desktop interactive.
+
+### NEW: choose whether effects settle on desktop icons
+
+The **Weather on desktop icons** switch follows your selected theme, with **three separately saved preferences**: *Snow on desktop icons*, *Rain on desktop icons*, and *Leaves on desktop icons*. Snow creates tiny caps on icon crests, rain adds splashes and temporary wet highlights, and autumn leaves can gather on the upper edges of app icons and folders. Turn any of these off to keep shortcuts clear while weather elsewhere continues normally. The icon detection/contour placement is restored to the **Preview 18 method** in response to visual feedback, while preserving newer snowbank stability and drag effects.
 
 > **Independent project, not an official KoiArt product.** Wintermas is an unofficial Windows alternative **inspired by** [KoiArt](https://koiart.app/), not made, sponsored, or endorsed by KoiArt. "Free" here means free to download and use **for permitted noncommercial purposes** under the repository's [PolyForm Noncommercial 1.0.0 license](./LICENSE). Commercial use requires separate permission.
 
@@ -59,6 +63,7 @@ Wintermas is a free-to-download, interactive **Windows desktop snowfall, rain an
 | Action | What to do |
 | --- | --- |
 | Switch seasons | Open the Wintermas tray icon and select **Snow**, **Rain**, or **Autumn**. |
+| Snow, rain, or leaves on icons | Use **Snow / Rain / Leaves on desktop icons** in the panel. Each season's setting is independent and remembered. |
 | Tune effects | Use the panel's intensity, wind, speed and (in Snow) snow diameter controls. |
 | Make a snowball | Choose **Make snowball**, or click and drag along an accumulated snowbank. |
 | Build a snowman | Move and stack three snowballs. |
@@ -74,9 +79,9 @@ Wintermas is a free-to-download, interactive **Windows desktop snowfall, rain an
 
 **Windows 64-bit (x64).** Download the **[latest available release](https://github.com/mohammadrezasmz2/Wintermas/releases)**, or get the current development preview:
 
-**[Wintermas v0.2.1 Preview 14 — download Windows setup (.exe)](https://github.com/mohammadrezasmz2/Wintermas/releases/download/v0.2.1-preview.14/Wintermas-Setup.exe)**
+**[Wintermas v0.2.1 Preview 21 — download Windows setup (.exe)](https://github.com/mohammadrezasmz2/Wintermas/releases/download/v0.2.1-preview.21/Wintermas-Setup.exe)**
 
-The preview release also provides a **[SHA-256 checksum](https://github.com/mohammadrezasmz2/Wintermas/releases/download/v0.2.1-preview.14/Wintermas-Setup.exe.sha256)**.
+The preview release also provides a **[SHA-256 checksum](https://github.com/mohammadrezasmz2/Wintermas/releases/download/v0.2.1-preview.21/Wintermas-Setup.exe.sha256)**.
 
 1. Download the EXE from this repository's official GitHub Releases.
 2. Check the SHA-256 digest against the published checksum if you wish to verify download integrity.
@@ -85,7 +90,7 @@ The preview release also provides a **[SHA-256 checksum](https://github.com/moha
 
 **Security:** Preview installers may be **unsigned**. A matching checksum confirms file integrity relative to the release, **not** that the software is safe. If antivirus reports a detection, investigate it rather than disabling security protections. You can uninstall Wintermas from **Windows Settings → Apps → Installed apps**.
 
-**Source code note:** The repository's default `main` branch tracks the earlier project. The **[preview development branch](https://github.com/mohammadrezasmz2/Wintermas/tree/fix/separate-weather-and-taskbar-art)** contains newer Autumn, snow physics and taskbar fixes shown in the preview installer. Check the exact release when comparing features.
+**Source code note:** The `main` branch contains the current development source for the three themes, icon weather controls and taskbar fixes. Each downloadable preview is frozen under its own [release tag](https://github.com/mohammadrezasmz2/Wintermas/releases); Preview 21 restores the Preview 18 icon recognition method and adds independent weather-on-icons switches.
 
 ## Frequently asked questions
 
@@ -120,7 +125,7 @@ To package the Windows installer:
 npm.cmd run build
 ```
 
-The NSIS build writes `dist/setup/Wintermas-Setup.exe`. To build the newer three-theme preview, check out `fix/separate-weather-and-taskbar-art` first.
+The NSIS build writes `dist/setup/Wintermas-Setup.exe`. To reproduce a specific preview installer, check out its release tag (for example, `git checkout v0.2.1-preview.21`) before building.
 
 ## Project structure
 

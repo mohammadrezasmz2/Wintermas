@@ -5,9 +5,9 @@ import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 
-const defaults = { enabled: false, intensity: 65, wind: 15, taskbar: true, paused: true, startup: false, weather: 'snow' };
+const defaults = { enabled: false, intensity: 65, wind: 15, snowSpeed: 100, snowDiameter: 5, rainSpeed: 100, autumnSpeed: 100, taskbar: true, iconsSnow: true, iconsRain: true, iconsAutumn: true, paused: true, startup: false, weather: 'snow' };
 const collapsed = { width: 96, height: 54 };
-const expanded = { width: 342, height: 690 };
+const expanded = { width: 342, height: 735 };
 const appPath = app.getAppPath();
 const native = join(appPath.endsWith('.asar') ? process.resourcesPath : appPath, 'native', 'desktop.exe');
 
@@ -18,7 +18,7 @@ let quitting = false, locked = false, tracking = false;
 let save = Promise.resolve();
 const overlays = new Map();
 const packagedEntry = process.defaultApp ? [app.getAppPath(), '--quiet'] : ['--quiet'];
-const weathers = ['snow', 'rain'];
+const weathers = ['snow', 'rain', 'autumn'];
 let displayCache;
 const diagnostics = createDiagnostics(app);
 // Chromium may treat a click-through overlay as occluded and pause its frames; keep it rendering.
@@ -34,13 +34,15 @@ function trayMenu() {
     { label: settings.enabled ? 'Turn Christmas mode off' : 'Turn Christmas mode on', click: () => {
       update({ enabled: !settings.enabled }).catch(console.error);
     } },
-    { label: 'Turn ' + (settings.weather === 'rain' ? 'rainfall' : 'snowfall') +
+    { label: 'Turn ' + (settings.weather === 'rain' ? 'rainfall' :
+      settings.weather === 'autumn' ? 'falling leaves' : 'snowfall') +
       (settings.paused ? ' on' : ' off'), enabled: settings.enabled, click: () => {
       update({ paused: !settings.paused }).catch(console.error);
     } },
     { label: 'Weather', enabled: settings.enabled, submenu: [
-      { label: 'Snow', type: 'radio', checked: settings.weather !== 'rain', click: () => update({ weather: 'snow' }).catch(console.error) },
+      { label: 'Snow', type: 'radio', checked: settings.weather === 'snow', click: () => update({ weather: 'snow' }).catch(console.error) },
       { label: 'Rain', type: 'radio', checked: settings.weather === 'rain', click: () => update({ weather: 'rain' }).catch(console.error) },
+      { label: 'Autumn', type: 'radio', checked: settings.weather === 'autumn', click: () => update({ weather: 'autumn' }).catch(console.error) },
     ] },
     { type: 'separator' },
     { label: 'Open diagnostic log', click: () => { shell.openPath(diagnostics.file).catch(console.error); } },
@@ -50,16 +52,25 @@ function trayMenu() {
 
 // The panel is a flyout above the tray icon: nothing stays pinned on the desktop.
 let panelHiddenAt = 0, panelPinned = false, showWhenSized = false;
+let lastTrayClick;
 
 function placeFlyout() {
   const { width, height } = panel.getBounds();
   const icon = tray.getBounds();
-  const anchor = icon.width > 0 ? { x: icon.x + icon.width / 2, y: icon.y + icon.height / 2 } : screen.getCursorScreenPoint();
+  // An icon inside the Windows overflow flyout may not have stable bounds.
+  // In that case anchor to the actual click, never to an unrelated cursor.
+  const fallbackDisplay = screen.getPrimaryDisplay();
+  const fallback = { x: fallbackDisplay.workArea.x + fallbackDisplay.workArea.width - 26,
+    y: fallbackDisplay.workArea.y + fallbackDisplay.workArea.height + 8 };
+  const anchor = icon.width > 0 && icon.height > 0
+    ? { x: icon.x + icon.width / 2, y: icon.y + icon.height / 2 }
+    : (lastTrayClick ?? fallback);
   const display = screen.getDisplayNearestPoint({ x: Math.round(anchor.x), y: Math.round(anchor.y) });
   const area = display.workArea, full = display.bounds, gap = 8;
   const clampX = x => Math.round(Math.max(area.x + gap, Math.min(x, area.x + area.width - width - gap)));
   const clampY = y => Math.round(Math.max(area.y + gap, Math.min(y, area.y + area.height - height - gap)));
-  let x = clampX(anchor.x - width / 2), y = area.y + area.height - height - gap;
+  let x = clampX(anchor.x - width / 2);
+  let y = clampY(anchor.y - height - gap);
   if (area.y > full.y) y = area.y + gap;
   else if (area.x > full.x) { x = area.x + gap; y = clampY(anchor.y - height / 2); }
   else if (area.width < full.width) { x = area.x + area.width - width - gap; y = clampY(anchor.y - height / 2); }
@@ -166,10 +177,13 @@ function syncVisibility() {
 
 async function update(patch) {
   if (!patch || typeof patch !== 'object') return settings;
-  for (const key of ['intensity', 'wind']) {
-    if (Number.isFinite(patch[key])) settings[key] = Math.max(key === 'wind' ? -100 : 0, Math.min(100, patch[key]));
+  for (const key of ['intensity', 'wind', 'snowSpeed', 'snowDiameter', 'rainSpeed', 'autumnSpeed']) {
+    if (!Number.isFinite(patch[key])) continue;
+    const min = key === 'wind' ? -100 : key === 'snowDiameter' ? 2 : key.endsWith('Speed') ? 25 : 0;
+    const max = key === 'snowDiameter' ? 12 : key.endsWith('Speed') ? 250 : 100;
+    settings[key] = Math.max(min, Math.min(max, patch[key]));
   }
-  for (const key of ['enabled', 'paused', 'taskbar', 'startup']) {
+  for (const key of ['enabled', 'paused', 'taskbar', 'startup', 'iconsSnow', 'iconsRain', 'iconsAutumn']) {
     if (typeof patch[key] === 'boolean') settings[key] = patch[key];
   }
   if (weathers.includes(patch.weather)) settings.weather = patch.weather;
@@ -195,7 +209,7 @@ async function update(patch) {
   return snapshot;
 }
 
-function broadcastGeometry(windows, pressed, control) {
+function broadcastGeometry(windows, pressed, control, minimized = [], moving = null, icons = []) {
   if (locked || !settings.enabled) return;
   const mouse = screen.getCursorScreenPoint();
   displayCache ??= new Map(screen.getAllDisplays().map(display => [display.id, display]));
@@ -217,10 +231,37 @@ function broadcastGeometry(windows, pressed, control) {
       }
     }
     const workBottom = display.workArea.y + display.workArea.height - y;
-    if (workBottom < height && !rectangles.some(rect => rect.taskbar && rect.bottom >= height - 1)) {
-      rectangles.unshift({ id: 'taskbar-fallback', left: 0, top: workBottom, right: width, bottom: height, taskbar: true });
+    // Display.workArea is the authoritative top of a bottom-docked Windows
+    // taskbar. The native Shell_TrayWnd frame can include inset/shadow pixels
+    // and should not override this actual usable desktop boundary.
+    if (workBottom > 0 && workBottom < height - 1 && Math.abs(display.workArea.y - y) < 1) {
+      // Drop duplicate Shell_TrayWnd geometry at this bottom edge: native DWM
+      // bounds can differ from the actual work-area top by several pixels.
+      // Every weather system must deposit on the SAME canonical ledge.
+      for (let i = rectangles.length - 1; i >= 0; i--) {
+        const rect = rectangles[i];
+        if (rect.taskbar && rect.bottom >= height - 4 && rect.top > height * .25 &&
+            rect.right > 0 && rect.left < width) rectangles.splice(i, 1);
+      }
+      rectangles.unshift({ id: 'taskbar-fallback', left: 0, top: workBottom,
+        right: width, bottom: height, taskbar: true });
     }
-    send(win, 'desktop', { rectangles, mouse: { x: mouse.x - x, y: mouse.y - y, pressed, control } });
+    const desktopIcons = [];
+    for (const icon of icons) {
+      // Native UI Automation supplies physical-pixel icon image bounds and
+      // alpha top contours, never filenames. Convert to per-display DIP.
+      const left = (icon.left - origin.x) / scale;
+      const top = (icon.top - origin.y) / scale;
+      const right = (icon.right - origin.x) / scale;
+      const bottom = (icon.bottom - origin.y) / scale;
+      if (right > 0 && bottom > 0 && left < width && top < height) {
+        desktopIcons.push({ id: 'desktop-icon-' + icon.id,
+          left, top, right, bottom, contour: icon.contour,
+          trusted: icon.trusted === true });
+      }
+    }
+    send(win, 'desktop', { rectangles, icons: desktopIcons, minimized, moving,
+      mouse: { x: mouse.x - x, y: mouse.y - y, pressed, control } });
   }
 }
 
@@ -232,12 +273,12 @@ function startTracking() {
   const lines = createInterface({ input: worker.stdout });
   lines.on('line', line => {
     try {
-      const { windows, pressed, control } = JSON.parse(line);
+      const { windows, pressed, control, minimized = [], moving = null, icons = [] } = JSON.parse(line);
       if (!tracking) {
         tracking = true;
         send(panel, 'desktop', { tracking });
       }
-      broadcastGeometry(windows, pressed, control);
+      broadcastGeometry(windows, pressed, control, minimized, moving, icons);
     } catch (error) { console.error(error.message); }
   });
   worker.once('close', code => {
@@ -297,7 +338,7 @@ async function smokeTest() {
     )));
     const panelReady = insideWorkArea && panelCheck.iconReady && panelCheck.open &&
       panelCheck.disabledByDefault && panelCheck.enabledAfterToggle &&
-      panelCheck.actions === 7 && panelCheck.bottom <= panelCheck.height;
+      panelCheck.actions === 9 && panelCheck.bottom <= panelCheck.height;
     if (!tracking || !panelReady || !renderers.length || !renderers.every(Boolean)) {
       throw new Error(JSON.stringify({ tracking, panelCheck, renderers }));
     }
@@ -371,8 +412,9 @@ async function start() {
   panel.on('blur', () => { if (!panelPinned && !process.argv.includes('--smoke-test')) hidePanel(); });
   tray = new Tray(icon.resize({ width: 32, height: 32, quality: 'best' }));
   tray.setToolTip('Wintermas');
-  tray.on('click', togglePanel);
-  tray.on('double-click', showPanel);
+  const rememberTrayClick = () => { lastTrayClick = screen.getCursorScreenPoint(); };
+  tray.on('click', () => { rememberTrayClick(); togglePanel(); });
+  tray.on('double-click', () => { rememberTrayClick(); showPanel(); });
   tray.on('balloon-click', showPanel);
   trayMenu();
   ipcMain.handle('settings:get', () => ({ ...settings, tracking }));
@@ -408,10 +450,15 @@ async function start() {
         send(win, 'effect:action', id === display.id ? { placement: action, color } : 'decor-cancel');
       }
     } else if (['clear', 'snowball', 'santa', 'reset', 'decor-reset'].includes(action)) {
+      if (settings.weather === 'rain' && action !== 'decor-reset') return;
+      if (settings.weather === 'autumn' && !['clear', 'reset', 'decor-reset'].includes(action)) return;
       for (const win of overlays.values()) send(win, 'effect:action', action);
     }
   });
-  for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(event, refreshOverlays);
+  for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(event, () => {
+    refreshOverlays();
+    if (panel?.isVisible()) placeFlyout();
+  });
   powerMonitor.on('lock-screen', () => { locked = true; syncRuntime(); });
   for (const event of ['suspend', 'resume', 'on-battery', 'on-ac']) {
     powerMonitor.on(event, () => diagnostics.write('info', 'power', event));

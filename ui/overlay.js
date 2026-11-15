@@ -6,8 +6,20 @@ import { drawGarland, drawTree, drawGift } from './christmas-decor.js';
 import { createSnowRenderer } from './snow-renderer.js';
 import { makeRope, brushRope, stepRope } from './garland-physics.js';
 import { createRain } from './rain.js';
+import { createAutumn } from './autumn.js';
 import { createFramePacer } from './frame-pacing.js';
 import { createPerfMonitor } from './perf-monitor.js';
+import { clipPrecipitation } from './precipitation-mask.js';
+import { shedOnWindowMotion, naturalSnowHeights, keepBallAboveTaskbar, canStackBall, needsAutoPlough, sweepSnowProfile, bladeTouchesBall } from './snow-behavior.js';
+import { santaStops, bladeCrosses, isOnBottomSurface } from './santa-visit.js';
+import { shouldReleaseWindowSnow } from './window-snow.js';
+import { shakeSnowOffWindow } from './window-powder.js';
+import { titlebarWindowAt, draggedEnough, hideMovingWindowSnow } from './window-drag.js';
+import { ploughBaselineForFloor, santaCenterForFloor, safeBottomFloor } from './taskbar-actors.js';
+import { snowDiameter, powderShares, setVisibleSnowDiameter } from './snow-diameter.js';
+import { dropTreeAt, fallTree } from './tree-physics.js';
+import { iconContactY, iconSnowLanding, preferIconHit, placeIconSnow,
+  syncIconSnow, paintIconSnow, createIconDragMonitor } from './desktop-icon-snow.js';
 
 const canvas = document.querySelector('canvas');
 const ctx = canvas.getContext('2d');
@@ -30,17 +42,27 @@ let previousScene, sceneVisible = false;
 let settings = { enabled: false, intensity: 65, wind: 15, taskbar: true, paused: true };
 let rectangles = [], mouse = { x: -1000, y: -1000 }, particles = [], accents = [], balls = [];
 let taskbars = [];
+let desktopIcons = [];
+const iconPiles = new Map();
+const iconDrag = createIconDragMonitor();
 let ground, plough, snowReady = false;
+let nextAutoPloughCheck = 0, lastPloughAt = -60_000;
 let lastDesktopSample;
+let movingWindowDrag;
+const movingWindowHoldUntil = new Map();
 let grabbed, grabOffset, capturing = false;
 let placement;
 let heldTree, frameRequest;
 const garlands = [], trees = [];
 let gifts = [];
 const piles = new Map();
+const celebratedSnowmen = new WeakSet();
+const santaPendingSnowmen = new Set();
+let nextSantaVisitAt = 0;
 
 // ---- v0.2: smooth pacing, dirty redraws, rain weather, diagnostics ----
 const rain = createRain(document.querySelector('#rain'));
+const autumn = createAutumn();
 let sceneDirty = false;
 const diagnostics = entry => window.wintermas?.log?.(entry);
 const pacer = createFramePacer(frame, {
@@ -50,6 +72,7 @@ const perf = createPerfMonitor(diagnostics, () => ({
   pacing: pacer.mode, refreshMs: +pacer.refreshMs.toFixed(2),
   snow: document.documentElement.dataset.snowBackend, rain: rain.stats(),
   weather: settings.weather ?? 'snow', flakes: particles.length, piles: piles.size,
+  icons: desktopIcons.length, iconBanks: iconPiles.size,
   windows: rectangles.length, width, height, dpr: devicePixelRatio,
 }));
 
@@ -70,35 +93,41 @@ function staticSceneInterval() {
 
 function applyWeather(before, next) {
   if ((before.weather ?? 'snow') === (next.weather ?? 'snow')) return;
+  // Clear both weather engines immediately. Old flakes, snowbanks and snowballs
+  // must not remain in Rain; old drops and wet window edges must not remain in Snow.
+  rain.clear();
+  autumn.clear();
+  particles = [];
+  accents = [];
+  balls = [];
+  gifts = [];
+  santaPendingSnowmen.clear();
+  nextSantaVisitAt = 0;
+  grabbed = undefined;
+  plough = undefined;
+  fraction = 0;
+  piles.clear();
+  iconPiles.clear();
+  iconDrag.reset();
+  movingWindowDrag = undefined;
+  movingWindowHoldUntil.clear();
+  if (ground) {
+    ground.profile.fill(0);
+    ground.raster = undefined;
+  }
+  capturePointer(false);
   snowReady = false;
   sceneDirty = true;
 }
 
-function meltSnow(dt) {
-  if (settings.weather !== 'rain' || settings.paused || settings.intensity <= 0) return;
-  const amount = dt * (0.3 + settings.intensity / 100 * 1.05);
-  for (const [id, pile] of [['ground', ground], ...piles]) {
-    const { profile } = pile;
-    let remaining = false;
-    for (let i = 0; i < profile.length; i++) {
-      if (profile[i] <= 0) continue;
-      profile[i] -= amount * (0.6 + profile[i] / 24);
-      if (profile[i] < 0.05) profile[i] = 0;
-      else remaining = true;
-    }
-    if (!remaining && pile !== ground) piles.delete(id);
-  }
-}
-
 function updateWeather(dt) {
-  meltSnow(dt);
-  rain.update(dt, settings, rectangles);
+  rain.update(dt, settings, rectangles, settings.iconsRain ? desktopIcons : []);
   rain.draw(rectangles, settings.taskbar);
 }
 
 function resize() {
-  const detailBudget = snowRenderer ? 1_050_000 : 760_000;
-  const scale = Math.min(devicePixelRatio, Math.sqrt(detailBudget / (innerWidth * innerHeight)));
+  // Scene contains snowbanks and the plough: unlike particle layers it needs crisp edges.
+  const scale = Math.max(1, Math.min(devicePixelRatio, 2, Math.sqrt(8_000_000 / (innerWidth * innerHeight))));
   if (width === innerWidth && height === innerHeight &&
       canvas.width === Math.round(width * scale) && canvas.height === Math.round(height * scale)) return;
   width = innerWidth;
@@ -106,39 +135,155 @@ function resize() {
   canvas.width = Math.round(width * scale);
   canvas.height = Math.round(height * scale);
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
-  snowRenderer?.resize(width, height, Math.min(devicePixelRatio, Math.sqrt(1_100_000 / (width * height))));
-  rain.resize(width, height, Math.min(devicePixelRatio, Math.sqrt(1_100_000 / (width * height))));
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  const particleScale = Math.min(devicePixelRatio, 2, Math.sqrt(3_000_000 / (width * height)));
+  snowRenderer?.resize(width, height, particleScale);
+  rain.resize(width, height, particleScale);
+  autumn.resize(width, height);
+  iconPiles.clear();
+  iconDrag.reset();
   sceneDirty = true;
   const rect = { id: 'ground', left: 0, right: width, top: height, bottom: height + 1 };
   ground = { rect, profile: new Float32Array(Math.ceil(width / column)), kind: 'snow' };
   snowReady = false;
 }
 
-function releaseSnow(x, y, depth, vx, vy) {
-  accents.push({
-    kind: 'chunk', x, y, vx, vy, alpha: 0.94, deposit: depth,
-    size: Math.min(7, Math.sqrt(depth) * 1.6),
-  });
+function bottomSurfaceAt(x) {
+  return bottomTaskbarAt(taskbars, x, height) ?? ground.rect;
 }
 
-function spill(pile) {
-  for (let index = 0; index < pile.profile.length; index++) {
-    const depth = pile.profile[index];
-    if (depth < 0.05) continue;
-    const x = pile.rect.left + (index + 0.5) * column;
-    const y = pile.rect.top - depth / 2;
-    releaseSnow(x, y, depth, random(-16, 16), 0);
+function releaseSnow(x, y, depth, vx, vy, avoidId = null) {
+  // A heavy window bank turns into MANY uniform-size powder flakes, rather
+  // than one giant clump whose rendered diameter depends on accumulated mass.
+  const shares = powderShares(depth, Math.max(0, 780 - accents.length));
+  const diameter = snowDiameter(settings.snowDiameter);
+  for (const deposit of shares) {
+    accents.push({
+      kind: 'chunk', x: x + random(-5, 5), y: y + random(-7, 7),
+      vx: vx + random(-35, 35), vy: vy + random(-40, 20),
+      alpha: 0.72, deposit,
+      avoidId, avoidFor: avoidId ? 0.75 : 0,
+      size: diameter,
+    });
   }
 }
+
+function spill(pile, avoidId = null) {
+  // Each three adjacent columns become one falling flurry on minimize.
+  for (let index = 0; index < pile.profile.length; index += 3) {
+    let depth = 0, count = 0;
+    for (let i = index; i < Math.min(index + 3, pile.profile.length); i++) {
+      depth += pile.profile[i];
+      count++;
+    }
+    if (depth < 0.12) continue;
+    const x = pile.rect.left + (index + count / 2) * column + random(-5, 5);
+    const y = pile.rect.top - depth / count - random(2, 9);
+    releaseSnow(x, y, depth * 0.9, random(-85, 85), random(-90, -12), avoidId);
+  }
+}
+
+// React to titlebar input, not only window-geometry events. This protects
+// against the 1-2 DWM frames when a rapidly dragged window has already moved
+// but the native tracker still reports its previous rectangle.
+function updateWindowDrag(next, now, nativeMoving = null) {
+  if (settings.weather !== 'snow' || !next) return;
+  if (!next.pressed) {
+    if (movingWindowDrag?.moved)
+      movingWindowHoldUntil.set(movingWindowDrag.id, now + 340);
+    movingWindowDrag = undefined;
+    return;
+  }
+  // Native WM_ENTERSIZEMOVE tracking supplies the real HWND even if a fast
+  // mouse move outruns our next sampled window rectangle. It takes precedence
+  // over the pointer-based titlebar heuristic used by custom titlebars.
+  if (nativeMoving && rectangles.some(r => r.id === nativeMoving && !r.taskbar)) {
+    if (!movingWindowDrag || movingWindowDrag.id !== nativeMoving)
+      movingWindowDrag = { id: nativeMoving, startX: next.x,
+        startY: next.y, moved: true };
+    movingWindowDrag.moved = true;
+    const pile = piles.get(nativeMoving);
+    if (pile) {
+      spill(pile, nativeMoving);
+      piles.delete(nativeMoving);
+      sceneDirty = true;
+    }
+    movingWindowHoldUntil.set(nativeMoving, now + 340);
+    return;
+  }
+  if (!mouse.pressed) {
+    const candidate = titlebarWindowAt(rectangles, next);
+    movingWindowDrag = candidate ? {
+      id: candidate.id, startX: next.x, startY: next.y, moved: false,
+    } : undefined;
+  }
+  const drag = movingWindowDrag;
+  if (!drag) return;
+  if (!drag.moved && draggedEnough(drag, next)) {
+    drag.moved = true;
+    const pile = piles.get(drag.id);
+    if (pile) {
+      // The old ridge should become a powder shower at its ORIGINAL location,
+      // not a stale line that follows the cursor a few frames later.
+      spill(pile, drag.id);
+      piles.delete(drag.id);
+    }
+    sceneDirty = true;
+  }
+  if (drag.moved) movingWindowHoldUntil.set(drag.id, now + 340);
+}
+
+function releaseIconBank(bank) {
+  if (settings.weather !== 'snow' || !settings.enabled || settings.paused) return;
+  const { rect, profile } = bank;
+  const cell = (rect.right - rect.left) / profile.length;
+  for (let i = 0; i < profile.length; i += 3) {
+    let mass = 0;
+    for (let j = i; j < Math.min(i + 3, profile.length); j++) mass += profile[j];
+    if (mass < 1.3) continue;
+    const x = rect.left + (i + 1.5) * cell;
+    const y = iconContactY(rect, Math.min(rect.right - .01, x)) ?? rect.top;
+    releaseSnow(x, y - mass * .20, mass * .55, random(-34, 34),
+      random(-55, -8));
+  }
+}
+
 function desktop(frame) {
   if (!frame.rectangles) return;
   const now = performance.now();
   const elapsed = Math.max(0.012, (now - (lastDesktopSample ?? now)) / 1000);
   lastDesktopSample = now;
   if (placement || geometryChanged(rectangles, frame.rectangles)) sceneDirty = true;
+  if (settings.weather === 'snow' && settings.iconsSnow && frame.mouse) {
+    if (iconDrag.update(frame.mouse, desktopIcons, rectangles, now, id => {
+      const pile = iconPiles.get(id);
+      if (pile) {
+        releaseIconBank(pile);
+        iconPiles.delete(id);
+      }
+    })) sceneDirty = true;
+  }
   rectangles = frame.rectangles;
   taskbars = rectangles.filter(rect => rect.taskbar);
-  updatePointer(frame.mouse, elapsed);
+  // Desktop shortcuts have their own tiny silhouette-following snowbanks.
+  // Their bounds exclude text labels; when moved or removed they release
+  // powder, rather than leaving frozen fragments on the wallpaper.
+  const nextIcons = Array.isArray(frame.icons) ? frame.icons : [];
+  if (settings.weather === 'snow' && settings.iconsSnow) {
+    if (syncIconSnow(iconPiles, nextIcons, releaseIconBank) ||
+        nextIcons.length !== desktopIcons.length) sceneDirty = true;
+  } else if (iconPiles.size) {
+    iconPiles.clear();
+    sceneDirty = true;
+  }
+  desktopIcons = nextIcons;
+  updateWindowDrag(frame.mouse, now, frame.moving);
+  if (settings.weather === 'autumn') {
+    autumn.syncGeometry(rectangles, frame.minimized,
+      settings.iconsAutumn ? desktopIcons : []);
+    autumn.onPointer(frame.mouse, elapsed);
+  } else updatePointer(frame.mouse, elapsed);
   mouse = frame.mouse;
   const byId = new Map(rectangles.map(rect => [rect.id, rect]));
   for (const [id, pile] of piles) {
@@ -146,9 +291,13 @@ function desktop(frame) {
     if (pile.rect.taskbar && (!settings.taskbar || settings.paused)) {
       piles.delete(id);
     } else if (!next) {
-      if (!next && now - (pile.lastSeen ??= now) < 125) continue;
-      spill(pile);
+      // A disappearing window must NEVER take its accumulated snow with it.
+      // Release its last visible bank into independent particles first, then
+      // delete the now-invalid HWND pile. Includes both Close and Minimize.
+      if (shouldReleaseWindowSnow(pile, next, settings)) spill(pile, id);
       piles.delete(id);
+      movingWindowHoldUntil.delete(id);
+      sceneDirty = true;
     } else {
       pile.lastSeen = now;
       const old = pile.rect;
@@ -158,20 +307,42 @@ function desktop(frame) {
         const { retained, detached } = resizeProfile(pile.profile, old, next, column);
         for (const { x, depth } of detached) {
           if (depth < 0.05) continue;
-          const edgeDelta = x < next.left ? next.left - old.left : next.right - old.right;
-          releaseSnow(x, old.top - depth / 2, depth, Math.max(-180, Math.min(180, edgeDelta / elapsed * 0.35)), 0);
-        }        pile.profile = retained;
-      } else if (!next.taskbar) {
-        const velocity = (next.left - old.left) / elapsed;
-        if (Math.abs(velocity) > 135) {
-          const index = velocity > 0 ? 0 : pile.profile.length - 1;
-          const depth = pile.profile[index] * Math.min(0.45, (Math.abs(velocity) - 135) * elapsed / 140);
-          if (depth > 0.05) {
-            pile.profile[index] -= depth;
-            const x = velocity > 0 ? next.left - 1 : next.right + 1;
-            releaseSnow(x, next.top - depth, depth, Math.max(-150, Math.min(150, velocity * 0.18)), 0);
+          releaseSnow(x, old.top - depth / 2, depth, (next.left - old.left) / elapsed * 0.18, -24);
+        }
+        pile.profile = retained;
+        pile.raster = undefined;
+      }
+      if (!next.taskbar) {
+        const dy = next.top - old.top;
+        const dx = next.left - old.left;
+        if (Math.abs(dy) >= 1.8) {
+          const powder = shakeSnowOffWindow(pile.profile, dy);
+          pile.noSettleUntil = now + 340;
+          movingWindowHoldUntil.set(id, now + 340);
+          pile.raster = undefined;
+          // Spread individual powder puffs across the whole former ridge.
+          for (const particle of powder) {
+            const x = next.left + particle.column * column + random(-6, 6);
+            const y = Math.min(next.top, old.top) - random(9, 28);
+            if (accents.length >= 760) break;
+            releaseSnow(x, y, particle.mass, random(-110, 110),
+              random(-145, -55), id);
+            // All released flakes use the same diameter as active snowfall.
+          }
+        } else {
+          const motion = shedOnWindowMotion(pile.profile, {
+            dx, dy, lastVx: pile.vx ?? 0, lastVy: pile.vy ?? 0,
+          }, elapsed);
+          pile.vx = motion.vx;
+          pile.vy = motion.vy;
+          for (const chunk of motion.dislodged) {
+            const x = next.left + (chunk.index + 0.5) * column;
+            releaseSnow(x, next.top - Math.max(8, pile.profile[chunk.index]) -
+              random(7, 16), chunk.amount, chunk.vx + random(-55, 55),
+              chunk.vy - random(50, 100), id);
           }
         }
+        if (dx || dy) pile.raster = undefined;
       }
       pile.rect = next;
     }
@@ -191,7 +362,18 @@ function configure(next) {
     fraction = 0;
     snowReady = false;
   }
+  const diameterChanged = snowDiameter(settings.snowDiameter) !== snowDiameter(next.snowDiameter);
   settings = next;
+  // Icons are opt-in separately for each seasonal theme. Disabling a mode
+  // immediately removes existing snow, wet glints, or leaves from shortcuts.
+  if (!next.iconsSnow) { iconPiles.clear(); iconDrag.reset(); }
+  if (!next.iconsRain) rain.clearIconWet();
+  if (!next.iconsAutumn) autumn.clearIconLeaves();
+  sceneDirty = true;
+  if (diameterChanged) {
+    setVisibleSnowDiameter(particles, accents, settings.snowDiameter);
+    sceneDirty = true;
+  }
   if (next.enabled && !wasEnabled) {
     previous = nextFrame = undefined;
     frameRequest = setTimeout(frame, 0);
@@ -210,17 +392,24 @@ function addPile(hit, amount = 1) {
   const { x } = hit;
   const rect = hit.rect.id === 'ground' ? bottomTaskbarAt(taskbars, x, height) ?? hit.rect : hit.rect;
   if (rect.taskbar && (!settings.taskbar || settings.paused)) return;
+  // Do not paint a new ridge using an obsolete rectangle while moving.
+  if (hideMovingWindowSnow(rect.id, movingWindowDrag, movingWindowHoldUntil,
+      performance.now())) return;
   if (rect.id !== 'ground' && !piles.has(rect.id)) {
     piles.set(rect.id, { rect, profile: new Float32Array(Math.ceil((rect.right - rect.left) / column)), kind: 'snow' });
   }
-  const { profile } = rect.id === 'ground' ? ground : piles.get(rect.id);
+  const targetPile = rect.id === 'ground' ? ground : piles.get(rect.id);
+  // Do not immediately regrow the thin line while a window is being dragged.
+  if (targetPile.noSettleUntil && performance.now() < targetPile.noSettleUntil) return;
+  const { profile } = targetPile;
   const center = Math.max(0, Math.min(profile.length - 1, Math.floor((x - rect.left) / column)));
   for (let dx = -2; dx <= 2; dx++) {
     const i = center + dx;
     if (i < 0 || i >= profile.length) continue;
     if (rect.id === 'ground' && bottomTaskbarAt(taskbars, (i + .5) * column, height)) continue;
-    const limit = rect.id === 'ground' ? 21 : 12;
-    profile[i] = Math.min(limit, profile[i] + (3 - Math.abs(dx)) * 0.38 * amount);
+    const limit = rect.id === 'ground' ? 20 : 13;
+    const irregularLimit = limit * (0.82 + 0.18 * Math.sin(i * 0.53 + rect.left * 0.003) ** 2);
+    profile[i] = Math.min(irregularLimit, profile[i] + (3 - Math.abs(dx)) * 0.38 * amount);
   }
 }
 
@@ -228,13 +417,18 @@ function spawnFlake() {
   const depth = Math.random() ** 1.65;
   return {
     kind: 'snow', x: random(0, width), y: -14, phase: random(0, Math.PI * 2),
-    alpha: 0.15 + depth * 0.58, size: 0.43 + depth * 1.65,
+    alpha: 0.72, size: snowDiameter(settings.snowDiameter),
     fall: 36 + depth * 106, vx: random(-7, 7),
     sway: random(4, 19), rate: random(0.6, 1.8), foreground: Math.random() < 0.18,
   };
 }
 
 function updateParticles(dt) {
+  if (settings.weather === 'autumn') {
+    autumn.update(dt, settings);
+    updateAutumnPlough(dt);
+    return;
+  }
   const budget = snowRenderer ? 950 : 360;
   if (!settings.paused && settings.intensity > 0 && settings.weather !== 'rain') {
     if (!snowReady) {
@@ -246,22 +440,30 @@ function updateParticles(dt) {
         particles.push(flake);
       }
     }
-    fraction += (snowRenderer ? 110 : 76) * settings.intensity / 100 * dt * Math.min(1.5, width / 1450);
+    fraction += (snowRenderer ? 110 : 76) * settings.intensity / 100 * dt * Math.min(1.5, width / 1450) * ((settings.snowSpeed ?? 100) / 100);
     while (fraction >= 1) {
       fraction--;
       if (particles.length < budget) particles.push(spawnFlake());
     }
   }
   const byId = new Map(rectangles.map(rect => [rect.id, rect]));
+  const landableIcons = settings.iconsSnow ? desktopIcons.filter(icon =>
+    !iconDrag.isBlocked(icon.id, performance.now())) : [];
   const wind = settings.wind * 0.62;
   // In-place compaction: same rules as before, without a new array and motion object every frame.
   let kept = 0;
   for (let index = 0; index < particles.length; index++) {
     const p = particles[index];
     const x0 = p.x, y0 = p.y;
-    snowStepInPlace(p, wind + p.vx, dt);
-    const hit = p.foreground ? null : landing(rectangles, x0, y0, p.x, p.y, settings.taskbar);
-    if (hit) { addPile(hit); continue; }
+    snowStepInPlace(p, wind + p.vx, dt * ((settings.snowSpeed ?? 100) / 100));
+    const hit = p.foreground ? null : preferIconHit(
+      landing(rectangles, x0, y0, p.x, p.y, settings.taskbar),
+      iconSnowLanding(landableIcons, rectangles, x0, y0, p.x, p.y));
+    if (hit) {
+      if (hit.icon) placeIconSnow(iconPiles, hit);
+      else addPile(hit);
+      continue;
+    }
     if (y0 <= height && p.y >= height) {
       addPile({ rect: ground.rect, x: p.x }, 1.25);
       continue;
@@ -274,32 +476,47 @@ function updateParticles(dt) {
   const trail = [];
   accents = accents.filter(p => {
     if (p.kind === 'santa') {
+      // Santa and sleigh travel on the LOWER edge, not in the middle of the desktop.
       p.age += dt;
-      const t = Math.min(1, p.age / p.duration);
-      p.x = -170 + (width + 340) * t;
-      p.y = height * (.42 - .28 * Math.sin(Math.PI * t) + .062 * Math.sin(4 * Math.PI * t));
-      p.tilt = Math.atan2(height * (-.28 * Math.PI * Math.cos(Math.PI * t) +
-        .248 * Math.PI * Math.cos(4 * Math.PI * t)), width + 340);
-      if (p.x > 24 && p.x < width - 24 && p.age >= p.nextGift && gifts.length < 24) {
-        gifts.push({ x: p.x - 20, y: p.y + 14, vx: 76, vy: 18, spin: 0,
-          color: ['#ba354e', '#3d8b6c', '#4368a7'][gifts.length % 3] });
-        p.nextGift = p.age + Math.max(.7, p.duration / 6);
+      p.x = -175 + p.age * 190;
+      const x = Math.max(0, Math.min(width - 1, p.x));
+      p.y = santaCenterForFloor(safeBottomFloor(taskbars, x, height));
+      p.tilt = 0;
+      while (p.stopIndex < p.stops.length && p.x >= p.stops[p.stopIndex].x) {
+        const stop = p.stops[p.stopIndex++];
+        const support = bottomSurfaceAt(stop.x);
+        if (stop.kind === 'gift' && gifts.length < 24) {
+          gifts.push({ x: stop.x, y: support.top - 8, spin: 0, vx: 0, vy: 0,
+            support: support.id, offset: stop.x - support.left,
+            color: ['#ba354e', '#3d8b6c', '#4368a7'][p.stopIndex % 3], fromSanta: true });
+        } else if (stop.kind === 'tree') {
+          trees.push({ anchor: { x: stop.x, y: support.top }, color: 'classic',
+            fromSanta: true, onBottom: true, falling: false, vy: 0 });
+          if (trees.length > 16) trees.shift();
+        }
+        sceneDirty = true;
       }
-      if (Math.random() < dt * 37) trail.push({
-        kind: 'magic', x: p.x - 47, y: p.y + 7, vx: random(-65, -18), vy: random(-45, 6),
-        life: random(.38, .9), size: random(.7, 2.4),
+      if (Math.random() < dt * 18) trail.push({
+        kind: 'magic', x: p.x - 45, y: p.y + 6, vx: random(-48, -12), vy: random(-35, 4),
+        life: random(.28, .62), size: random(.7, 1.7),
       });
-      return t < 1;
+      return p.x < width + 170;
     }
     if (p.deposit !== undefined) {
       const x0 = p.x, y0 = p.y;
       p.vy += dt * 420;
       p.x = Math.max(0, Math.min(width - 0.01, p.x + p.vx * dt));
       p.y += p.vy * dt;
-      const hit = landing(rectangles, x0, y0, p.x, p.y, settings.taskbar);
-      const surface = hit ?? (p.y >= height ? { rect: ground.rect, x: p.x } : null);
+      p.avoidFor = Math.max(0, (p.avoidFor ?? 0) - dt);
+      const landingRects = p.avoidFor && p.avoidId
+        ? rectangles.filter(rect => rect.id !== p.avoidId) : rectangles;
+      const hit = preferIconHit(
+        landing(landingRects, x0, y0, p.x, p.y, settings.taskbar),
+        iconSnowLanding(landableIcons, landingRects, x0, y0, p.x, p.y));
+      const surface = hit ?? (p.y >= height ? { rect: bottomSurfaceAt(p.x), x: p.x } : null);
       if (!surface) return true;
-      addPile(surface, p.deposit / 3.42);
+      if (surface.icon) placeIconSnow(iconPiles, surface, p.deposit / 3.42);
+      else addPile(surface, p.deposit / 3.42);
       return false;
     }
     p.life -= dt;
@@ -310,12 +527,34 @@ function updateParticles(dt) {
     return p.life > 0 && p.y < height + 60;
   });
   accents.push(...trail);
+  updateTrees(dt);
   updateSnowProps(dt, byId);
   updateGifts(dt, byId);
+  dispatchQueuedSantaVisit();
+}
+
+function updateTrees(dt) {
+  for (const tree of trees) {
+    if (tree === heldTree?.tree || plough?.carriedTrees.includes(tree)) continue;
+    if (tree.anchor?.id && !rectangles.some(r => r.id === tree.anchor.id)) {
+      // The former support vanished; let this tree fall rather than freeze.
+      tree.anchor = { x: tree.lastX ?? width / 2, y: tree.lastY ?? 0 };
+      tree.falling = true;
+      tree.vy = 0;
+    }
+    const world = resolveAnchor(tree.anchor);
+    if (world) { tree.lastX = world.x; tree.lastY = world.y; }
+    if (fallTree(tree, dt, rectangles, x => bottomSurfaceAt(x).top)) {
+      const next = resolveAnchor(tree.anchor);
+      if (next) { tree.lastX = next.x; tree.lastY = next.y; }
+      sceneDirty = true;
+    }
+  }
 }
 
 function updateGifts(dt, byId) {
   for (const gift of gifts) {
+    if (plough?.carriedGifts.includes(gift)) continue;
     if (gift.support) {
       const support = gift.support === 'ground' ? ground.rect : byId.get(gift.support);
       if (support && (!support.taskbar || settings.taskbar)) {
@@ -331,7 +570,8 @@ function updateGifts(dt, byId) {
     gift.y += gift.vy * dt;
     gift.spin += dt * 2;
     const hit = landing(rectangles, oldX, oldBottom, gift.x, gift.y + 8, settings.taskbar);
-    const support = hit?.rect ?? (gift.y + 8 >= height ? ground.rect : null);
+    const floor = bottomSurfaceAt(gift.x);
+    const support = hit?.rect ?? (gift.y + 8 >= floor.top ? floor : null);
     if (!support) continue;
     gift.y = support.top - 8;
     if (gift.vy > 100) {
@@ -376,7 +616,7 @@ function updatePointer(next, elapsed) {
     const anchor = anchorAt(next);
     placement.deadline = performance.now() + 25000;
     if (placement.kind === 'tree') {
-      trees.push({ anchor, color: placement.color });
+      trees.push({ ...dropTreeAt(next, rectangles), color: placement.color });
       if (trees.length > 16) trees.shift();
       cancelPlacement();
     } else if (placement.start) {
@@ -398,27 +638,33 @@ function updatePointer(next, elapsed) {
   if (heldTree) {
     const { tree, offset } = heldTree;
     const point = { x: next.x + offset.x, y: next.y + offset.y };
-    tree.anchor = next.pressed ? point : anchorAt(point);
     if (next.pressed) {
+      tree.anchor = point;
+      tree.falling = false;
+      tree.onBottom = false;
+      tree.vy = 0;
       const target = Math.max(-.28, Math.min(.28, -dx / elapsed * .001));
       tree.leanTarget = target;
     }
     if (!next.pressed) {
+      Object.assign(tree, dropTreeAt(point, rectangles));
       tree.leanTarget = 0;
       heldTree = undefined;
       capturePointer(false);
+      sceneDirty = true;
     }
     return;
   }
   if (!grabbed && (!next.pressed || clicked)) {
     const tree = trees.findLast(candidate => {
+      if (plough?.carriedTrees.includes(candidate)) return false;
       const point = resolveAnchor(candidate.anchor);
       if (!point) return false;
       const fromBase = point.y - next.y;
       return fromBase >= 0 && fromBase <= 115 &&
         Math.abs(point.x - next.x) < Math.max(10, 42 * (1 - fromBase / 122));
     });
-    if (tree) {
+    if (tree && !plough?.carriedTrees.includes(tree)) {
       capturePointer(true);
       if (clicked) {
         const point = resolveAnchor(tree.anchor);
@@ -477,16 +723,21 @@ function updatePileRaster(pile, now) {
   const rasterWidth = Math.ceil(rect.right - rect.left);
   if (rasterWidth < 1) return null;
   const cache = pile.raster ??= { canvas: document.createElement('canvas') };
-  const resized = cache.width !== rasterWidth || cache.profile?.length !== profile.length;
+  const rasterScale = Math.min(2, Math.max(1, devicePixelRatio));
+  const resized = cache.width !== rasterWidth || cache.scale !== rasterScale || cache.profile?.length !== profile.length;
   if (!resized && now - cache.updatedAt < 90) return cache;
   if (!resized && !profile.some((depth, i) => depth !== cache.profile[i])) return cache;
 
-  const maxDepth = Math.max(5, ...profile);
+  const ridge = naturalSnowHeights(profile, rect.left * 0.007 + rect.top * 0.002);
+  const maxDepth = Math.max(5, ...ridge);
   const rasterHeight = Math.max(24, Math.ceil(maxDepth) + 2);
   const surface = cache.canvas;
-  if (surface.width !== rasterWidth) surface.width = rasterWidth;
-  if (surface.height !== rasterHeight) surface.height = rasterHeight;
+  if (surface.width !== Math.ceil(rasterWidth * rasterScale)) surface.width = Math.ceil(rasterWidth * rasterScale);
+  if (surface.height !== Math.ceil(rasterHeight * rasterScale)) surface.height = Math.ceil(rasterHeight * rasterScale);
   const paint = surface.getContext('2d');
+  paint.setTransform(rasterScale, 0, 0, rasterScale, 0, 0);
+  paint.imageSmoothingEnabled = true;
+  paint.imageSmoothingQuality = 'high';
   const baseline = rasterHeight - 1;
   paint.clearRect(0, 0, rasterWidth, rasterHeight);
   const gradient = paint.createLinearGradient(0, baseline - maxDepth, 0, baseline + 1);
@@ -495,11 +746,12 @@ function updatePileRaster(pile, now) {
   gradient.addColorStop(1, '#c0cfe7');
   paint.beginPath();
   paint.moveTo(0, baseline);
-  for (let i = 0; i < profile.length; i++) {
+  paint.lineTo(0, baseline - ridge[0]);
+  for (let i = 0; i < ridge.length; i++) {
     const x = Math.min(rasterWidth, (i + 0.5) * column);
-    const nextX = Math.min(rasterWidth, (i + 1) * column);
-    paint.quadraticCurveTo(x, baseline - profile[i], nextX,
-      baseline - (profile[i] + (profile[i + 1] ?? 0)) / 2);
+    const right = Math.min(rasterWidth, (i + 1) * column);
+    paint.quadraticCurveTo(x, baseline - ridge[i], right,
+      baseline - (ridge[i] + (ridge[i + 1] ?? ridge[i])) / 2);
   }
   paint.lineTo(rasterWidth, baseline);
   paint.closePath();
@@ -510,6 +762,8 @@ function updatePileRaster(pile, now) {
     paint.fill();
   }
   cache.width = rasterWidth;
+  cache.height = rasterHeight;
+  cache.scale = rasterScale;
   cache.baseline = baseline;
   cache.profile = profile.slice();
   cache.updatedAt = now;
@@ -518,7 +772,8 @@ function updatePileRaster(pile, now) {
 
 function paintProfile(pile, covers, now) {
   const { rect, profile } = pile;
-  if (!profile.some(depth => depth > 0.05)) return;
+  // Subpixel residue must not appear as a bright horizontal hairline.
+  if (!profile.some(depth => depth > 1.15)) return;
   const raster = updatePileRaster(pile, now);
   if (!raster) return;
   const top = rect.top - raster.baseline;
@@ -530,19 +785,17 @@ function paintProfile(pile, covers, now) {
     ctx.rect(cover.left, cover.top, cover.right - cover.left, cover.bottom - cover.top);
     ctx.clip('evenodd');
   }
-  ctx.drawImage(raster.canvas, rect.left, top);
+  ctx.drawImage(raster.canvas, rect.left, top, raster.width, raster.height);
   ctx.restore();
 }
 
 function paintPiles(now) {
   paintProfile(ground, taskbars, now);
-  const visible = new Set(rectangles.map(rect => rect.id));
-  for (const [id, pile] of piles) {
-    if (!visible.has(id)) paintProfile(pile, rectangles, now);
-  }
+  // Do not paint stale piles for windows omitted by the native tracker.
   rectangles.forEach((rect, z) => {
     const pile = piles.get(rect.id);
-    if (pile) paintProfile(pile, rectangles.slice(0, z), now);
+    if (pile && !hideMovingWindowSnow(rect.id, movingWindowDrag,
+        movingWindowHoldUntil, now)) paintProfile(pile, rectangles.slice(0, z), now);
   });
 }
 
@@ -569,49 +822,188 @@ function alignStack(root) {
   }
 }
 
+function launchSantaVisit(snowmanXs) {
+  if (accents.some(p => p.kind === 'santa')) return false;
+  accents.push({ kind: 'santa', x: -175, y: santaCenterForFloor(safeBottomFloor(taskbars, 0, height)),
+    age: 0, stops: santaStops(snowmanXs, width), stopIndex: 0, alpha: 1 });
+  sceneDirty = true;
+  return true;
+}
+
+function dispatchQueuedSantaVisit() {
+  if (!nextSantaVisitAt || performance.now() < nextSantaVisitAt ||
+      settings.weather === 'rain' || settings.paused || !settings.enabled ||
+      accents.some(p => p.kind === 'santa')) return;
+  const people = [...santaPendingSnowmen].filter(root =>
+    balls.includes(root) && !root.broken && stackMembers(root).length >= 3);
+  santaPendingSnowmen.clear();
+  nextSantaVisitAt = 0;
+  if (people.length) launchSantaVisit(people.map(root => root.x));
+}
+
+function updateAutumnPlough(dt) {
+  if (plough) {
+    const previousX = plough.x;
+    plough.x -= 245 * dt;
+    const picked = autumn.sweep(previousX - 38, plough.x - 38);
+    // Real collected leaves make the pile grow gradually, not a white mound.
+    plough.load = Math.min(1800, Math.max(0,
+      plough.load + picked * 17 - (picked ? 0 : dt * 7)));
+    if (plough.x < -150) plough = undefined;
+  } else if (settings.enabled && !settings.paused && settings.taskbar &&
+      performance.now() >= nextAutoPloughCheck) {
+    nextAutoPloughCheck = performance.now() + 1700;
+    if (performance.now() - lastPloughAt > 30_000 && autumn.needsSweep()) {
+      startPlough();
+    }
+  }
+}
+
+function startPlough() {
+  if (plough || settings.weather === 'rain') return;
+  plough = { x: width + 70, load: 0, carried: [], carriedGifts: [], carriedTrees: [] };
+  lastPloughAt = performance.now();
+}
+
+function settleOnSnowball(ball, base) {
+  ball.size = Math.min(ball.size, base.size * 0.86);
+  ball.stack = base;
+  ball.support = base.support;
+  ball.previousSupport = base.previousSupport;
+  ball.x = base.x;
+  ball.y = base.y - base.size - ball.size + 2;
+  ball.vx = ball.vy = 0;
+  ball.thrown = false;
+  const root = stackRoot(ball);
+  if (stackMembers(root).length >= 3 && !celebratedSnowmen.has(root)) {
+    celebratedSnowmen.add(root);
+    santaPendingSnowmen.add(root);
+    if (!nextSantaVisitAt) nextSantaVisitAt = performance.now() + 1100;
+  }
+}
+
+function findSnowballBase(ball) {
+  if (stackMembers(ball).length !== 1) return null;
+  return balls.findLast(other => other !== ball && !balls.some(child => child.stack === other) &&
+    stackRoot(other) !== ball && stackMembers(stackRoot(other)).length < 3 && canStackBall(ball, other));
+}
+
 function updateSnowProps(dt, byId) {
   if (plough) {
+    const previousX = plough.x;
     plough.x -= 245 * dt;
+    const previousBlade = previousX - 38;
+    const blade = plough.x - 38;
+    let gatheredArea = 0;
     for (const pile of [ground, ...piles.values()]) {
       if (pile !== ground && !pile.rect.taskbar) continue;
-      const edge = Math.floor((plough.x - 26 - pile.rect.left) / column);
-      for (let i = edge; i <= edge + 6; i++) {
-        if (i < 0 || i >= pile.profile.length || pile.profile[i] < 0.3) continue;
-        const depth = pile.profile[i];
-        pile.profile[i] = 0;
-        plough.heap[0] += depth * column / 3;
+      const swept = sweepSnowProfile(pile, previousBlade, blade, column);
+      gatheredArea += swept.area;
+    }
+    // Load is accumulated swept snow AREA, not a fixed triangle of pixels.
+    // Snow visibly grows in front of the blade and slowly subsides in clear areas.
+    if (gatheredArea > 0) {
+      plough.load = Math.min(1800, plough.load + gatheredArea * 0.72);
+      if (Math.random() < 0.65 && accents.length < 780) {
+        const frontX = Math.max(0, Math.min(width - 1, blade));
         accents.push({
-          kind: 'chunk', x: pile.rect.left + i * column, y: pile.rect.top - depth,
-          vx: random(-165, -35), vy: random(-105, -30), size: random(1, 4), life: 0.6,
+          kind: 'chunk', x: blade - random(0, 20), y: bottomSurfaceAt(frontX).top - random(5, 20),
+          vx: random(-115, -30), vy: random(-115, -40),
+          size: snowDiameter(settings.snowDiameter), alpha: 0.72, life: 0.6,
         });
       }
+    } else plough.load = Math.max(0, plough.load - dt * 28);
+
+    // Sweep snowballs AND entire snowmen by their bottom/root snowball.
+    for (const root of balls) {
+      if (root.stack || root.broken || root === grabbed || plough.carried.includes(root)) continue;
+      const floor = bottomSurfaceAt(root.x).top;
+      if (!bladeTouchesBall(root, previousBlade, blade, floor)) continue;
+      plough.carried.push(root);
+      plough.load = Math.min(1800, plough.load + Math.PI * root.size ** 2 * 0.33);
+      root.support = null;
     }
-    // Transfer mass away from the blade whenever adjacent columns exceed a stable slope.
-    const heap = plough.heap;
-    for (let pass = 0; pass < 4; pass++) {
-      for (let i = 0; i < heap.length - 1; i++) {
-        const flow = Math.max(0, heap[i] - heap[i + 1] - 2.4) * Math.min(.42, dt * 20);
-        heap[i] -= flow;
-        heap[i + 1] += flow;
+    // Carried decorations follow the blade and leave with the machine.
+    for (const gift of gifts) {
+      if (plough.carriedGifts.includes(gift) || gift === undefined) continue;
+      if (!isOnBottomSurface(gift.y + 8, gift.x, x => bottomSurfaceAt(x).top, 18)) continue;
+      if (bladeCrosses(previousBlade, blade, gift.x, 10)) {
+        gift.support = null;
+        plough.carriedGifts.push(gift);
       }
     }
-    if (heap[heap.length - 1] > 1.6) {
-      const amount = Math.min(heap[heap.length - 1], dt * 24);
-      heap[heap.length - 1] -= amount;
-      releaseSnow(plough.x - 30 - heap.length * 3, height - amount - 2, amount, -120, -35);
+    for (const tree of trees) {
+      if (plough.carriedTrees.includes(tree) || tree === heldTree?.tree) continue;
+      const anchor = resolveAnchor(tree.anchor);
+      if (!anchor) continue;
+      // Santa trees are taskbar-bound even if the work area moves a few pixels.
+      const nearFloor = tree.fromSanta ||
+        isOnBottomSurface(anchor.y, anchor.x, x => bottomSurfaceAt(x).top, 42);
+      if (!nearFloor) continue;
+      if (bladeCrosses(previousBlade, blade, anchor.x, 55)) {
+        tree.anchor = { x: anchor.x, y: anchor.y };
+        tree.leanTarget = -0.2;
+        tree.falling = false;
+        tree.onBottom = false;
+        tree.vy = 0;
+        plough.carriedTrees.push(tree);
+      }
     }
-    if (plough.x < -80) plough = undefined;
+    let carriedOffset = 0;
+    for (const root of plough.carried) {
+      const nextX = plough.x - 50 - root.size - carriedOffset;
+      const floor = bottomSurfaceAt(Math.max(0, Math.min(width - 1, nextX))).top;
+      root.x = nextX;
+      root.y = floor - root.size;
+      root.vx = root.vy = 0;
+      root.rotation = (root.rotation ?? 0) - 245 * dt / Math.max(5, root.size);
+      alignStack(root);
+      carriedOffset += root.size * 1.7;
+    }
+    for (const gift of plough.carriedGifts) {
+      gift.x = plough.x - 56 - carriedOffset;
+      gift.y = bottomSurfaceAt(Math.max(0, Math.min(width - 1, gift.x))).top - 8;
+      gift.vx = gift.vy = 0;
+      carriedOffset += 24;
+    }
+    for (const tree of plough.carriedTrees) {
+      const x = plough.x - 83 - carriedOffset;
+      tree.anchor = { x, y: bottomSurfaceAt(Math.max(0, Math.min(width - 1, x))).top };
+      tree.falling = false;
+      tree.onBottom = false;
+      tree.leanTarget = -0.08;
+      carriedOffset += 75;
+    }
+    if (plough.x < -110 - carriedOffset) {
+      const carried = new Set(plough.carried);
+      const carriedGifts = new Set(plough.carriedGifts);
+      const carriedTrees = new Set(plough.carriedTrees);
+      balls = balls.filter(ball => !carried.has(stackRoot(ball)));
+      gifts = gifts.filter(gift => !carriedGifts.has(gift));
+      for (let i = trees.length - 1; i >= 0; i--) {
+        if (carriedTrees.has(trees[i])) trees.splice(i, 1);
+      }
+      plough = undefined;
+    }
+  } else if (settings.weather !== 'rain' && settings.enabled && !settings.paused &&
+      settings.taskbar && performance.now() >= nextAutoPloughCheck) {
+    nextAutoPloughCheck = performance.now() + 1600;
+    if (performance.now() - lastPloughAt > 32_000 &&
+        needsAutoPlough(piles.values(), ground)) {
+      startPlough();
+    }
   }
   for (const ball of balls) {
-    if (ball === grabbed) continue;
+    if (ball === grabbed || plough?.carried.includes(ball)) continue;
     if (ball.stack) {
       if (balls.includes(ball.stack)) continue;
       ball.stack = null;
       ball.support = null;
     }
     if (ball.support) {
-      const rect = ball.support === 'ground' ? ground.rect : byId.get(ball.support);
-      if (rect && (!rect.taskbar || settings.taskbar)) {
+      const rect = ball.support === 'ground' ? bottomSurfaceAt(ball.x) : byId.get(ball.support);
+      if (rect) {
+        ball.support = rect.id;
         ball.x += rect.left - ball.previousSupport.left;
         ball.y = rect.top - ball.size;
         ball.previousSupport = rect;
@@ -620,6 +1012,7 @@ function updateSnowProps(dt, byId) {
           ball.rotation = (ball.rotation ?? 0) + ball.vx * dt / ball.size;
         }
         ball.vx *= Math.exp(-dt * 1.9);
+        keepBallAboveTaskbar(ball, taskbars, height);
         if (ball.x >= rect.left + ball.size * 0.28 && ball.x <= rect.right - ball.size * 0.28) continue;
       }
       ball.support = null;
@@ -633,19 +1026,14 @@ function updateSnowProps(dt, byId) {
     const hit = landing(rectangles, oldX, oldBottom, ball.x, ball.y + ball.size, settings.taskbar);
     const members = stackMembers(ball);
     const base = members.length === 1 && balls.find(other => other !== ball && !other.broken &&
-      stackRoot(other) !== grabbed && other.support &&
-      !other.stack?.stack &&
-      !balls.some(child => child.stack === other) && Math.abs(other.x - ball.x) < other.size * 0.72 &&
-      oldBottom <= other.y - other.size + 2 && ball.y + ball.size >= other.y - other.size + 2);
-    if (base && Math.hypot(ball.vx, ball.vy) < 300) {
-      ball.stack = base;
-      ball.support = base.support;
-      ball.x = base.x;
-      ball.y = base.y - base.size - ball.size + 2;
-      ball.vx = ball.vy = 0;
+      stackRoot(other) !== ball && !balls.some(child => child.stack === other) &&
+      stackMembers(stackRoot(other)).length < 3 && canStackBall(ball, other));
+    if (base && Math.hypot(ball.vx, ball.vy) < 310) {
+      settleOnSnowball(ball, base);
       continue;
     }
-    const support = hit?.rect ?? (ball.y + ball.size >= height ? ground.rect : null);
+    const floor = bottomSurfaceAt(ball.x);
+    const support = hit?.rect ?? (ball.y + ball.size >= floor.top ? floor : null);
     if (support) {
       ball.y = support.top - ball.size;
       ball.x = Math.max(ball.size * 0.35, Math.min(width - ball.size * 0.35, ball.x));
@@ -671,12 +1059,21 @@ function updateSnowProps(dt, byId) {
         ball.vy = 0;
       }
     }
+    keepBallAboveTaskbar(ball, taskbars, height);
   }
   balls = balls.filter(ball => {
     const root = stackRoot(ball);
     return !ball.broken && root.x >= -80 && root.x <= width + 80;
   });
-  for (const ball of balls) if (!ball.stack) alignStack(ball);
+  for (const ball of balls) if (!ball.stack) {
+    keepBallAboveTaskbar(ball, taskbars, height);
+    alignStack(ball);
+    if (stackMembers(ball).length >= 3 && !celebratedSnowmen.has(ball)) {
+      celebratedSnowmen.add(ball);
+      santaPendingSnowmen.add(ball);
+      if (!nextSantaVisitAt) nextSantaVisitAt = performance.now() + 1100;
+    }
+  }
 }
 
 function capturePointer(value) {
@@ -753,18 +1150,28 @@ function updateBallPointer(next, dt) {
   }
   if (!next.pressed) {
     const ball = grabbed;
+    const base = findSnowballBase(ball);
+    if (base) {
+      settleOnSnowball(ball, base);
+      grabbed = undefined;
+      capturePointer(false);
+      sceneDirty = true;
+      return;
+    }
     const bottom = ball.y + ball.size;
     const slow = Math.hypot(ball.vx, ball.vy) < 175;
     const aboveBall = balls.some(other => stackRoot(other) !== ball && other.support &&
       Math.abs(other.x - ball.x) < other.size * 0.72 &&
       Math.abs(bottom - (other.y - other.size)) < 16);
-    const support = slow && !aboveBall && landing([...rectangles, ground.rect], ball.x, bottom - 12,
-      ball.x, bottom + 16, settings.taskbar)?.rect;
+    const floor = bottomSurfaceAt(ball.x);
+    const support = slow && !aboveBall && (landing([...rectangles, ground.rect], ball.x, bottom - 12,
+      ball.x, bottom + 16, settings.taskbar)?.rect ?? (bottom >= floor.top - 12 ? floor : null));
     if (support && ball.x > support.left && ball.x < support.right) {
       Object.assign(ball, { support: support.id, previousSupport: support,
         y: support.top - ball.size, vx: 0, vy: 0, thrown: false });
       alignStack(ball);
     } else ball.thrown = true;
+    keepBallAboveTaskbar(ball, taskbars, height);
     grabbed = undefined;
     capturePointer(Boolean(hovered || snow));
     return;
@@ -777,7 +1184,9 @@ function updateBallPointer(next, dt) {
   grabbed.rotation = (grabbed.rotation ?? 0) + (next.x - mouse.x) / grabbed.size;
   if (stackMembers(grabbed).length === 1) {
     rollOnSnow(grabbed, next, Math.hypot(next.x - mouse.x, next.y - mouse.y));
-  } else alignStack(grabbed);
+  }
+  keepBallAboveTaskbar(grabbed, taskbars, height);
+  alignStack(grabbed);
 }
 
 function paintSnowProps(now) {
@@ -787,7 +1196,19 @@ function paintSnowProps(now) {
   for (const head of balls) {
     if (head.stack?.stack && !head.stack.stack.stack) drawSnowman(ctx, head, head.stack);
   }
-  if (plough) drawPlough(ctx, plough.x, height - 3, plough.heap, snowGrain, now);
+  if (plough) {
+    const x = Math.max(0, Math.min(width - 1, plough.x));
+    // Draw the mound baseline at the taskbar edge. The old -4 offset left
+    // a dark strip between the accumulated snow and the ground.
+    const floorY = safeBottomFloor(taskbars, x, height);
+    const vehicleY = ploughBaselineForFloor(floorY);
+    if (settings.weather === 'autumn') {
+      // Leaf heap must contact the actual floor; the vehicle art extends
+      // below its own origin, so use a separate safe vehicle baseline.
+      autumn.drawMound(ctx, plough.x, floorY - 1, plough.load, now);
+      drawPlough(ctx, plough.x, vehicleY, 0, snowGrain, now);
+    } else drawPlough(ctx, plough.x, vehicleY, plough.load, snowGrain, now);
+  }
 }
 
 // Paint flake sprites once. The soft edge keeps distant flakes from reading as white dots.
@@ -806,10 +1227,8 @@ function paintParticle(p, now) {
   const { x, y, size, kind } = p;
   ctx.globalAlpha = p.alpha ?? Math.min(1, p.life * 2.5);
   if (kind === 'snow' || kind === 'chunk') {
-    const span = size * 2.9;
-    const tail = kind === 'snow' ? Math.min(size * 1.25, p.vy * 0.013) : 0;
-    const offset = Math.max(-1.5, Math.min(1.5, (p.swayVelocity ?? 0) * .013));
-    ctx.drawImage(flakeSprite, x - span / 2 - offset, y - span / 2 - tail, span, span + tail);
+    const span = size * 1.48;
+    ctx.drawImage(flakeSprite, x - span / 2, y - span / 2, span, span);
   } else if (kind === 'magic') {
     ctx.fillStyle = '#ffd989';
     ctx.beginPath();
@@ -823,28 +1242,17 @@ function paintParticle(p, now) {
 }
 
 function paintSnowFallback() {
-  ctx.fillStyle = '#eaf3ff';
-  for (let band = 0; band < 4; band++) {
-    ctx.globalAlpha = (band + 1) * .19;
-    ctx.beginPath();
-    for (const flake of particles) {
-      if (Math.min(3, Math.floor(flake.alpha * 5)) !== band) continue;
-      const radius = Math.max(.58, flake.size * .84);
-      ctx.moveTo(flake.x + radius, flake.y);
-      ctx.arc(flake.x, flake.y, radius, 0, Math.PI * 2);
-    }
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
+  // Use exactly the same flake sprite and diameter as window powder.
+  for (const flake of particles) paintParticle(flake, 0);
 }
 
 function frame(timestamp) {
   // Vsync timestamps can sit slightly before a timer-driven frame; never let time run backwards.
   const now = Math.max(typeof timestamp === 'number' ? timestamp : performance.now(), previous ?? -Infinity);
   const interval = 1000 / 60;
-  if (settings.paused && !particles.length && !accents.length && !balls.length && !gifts.length &&
+  if (settings.paused && !autumn.active() && !particles.length && !accents.length && !balls.length && !gifts.length &&
       !placement && !plough && !garlands.length && !trees.length && !piles.size &&
-      !ground.profile.some(Boolean) && !rain.active()) {
+      !iconPiles.size && !ground.profile.some(Boolean) && !rain.active()) {
     // Clear the last animation frame once, then avoid sending empty frames to DWM.
     if (previous !== undefined || !document.documentElement.dataset.rendered) {
       ctx.clearRect(0, 0, width, height);
@@ -868,12 +1276,13 @@ function frame(timestamp) {
   updateWeather(dt);
   const sceneNeeded = !snowRenderer && particles.length || accents.length || balls.length ||
     gifts.length || placement || plough || garlands.length || trees.length || piles.size ||
-    ground.profile.some(Boolean) || rain.needsScene();
+    iconPiles.size || ground.profile.some(Boolean) || rain.needsScene() || autumn.active();
   const fastScene = !snowRenderer && particles.length || grabbed || heldTree || plough ||
     accents.length || balls.some(ball => !ball.support || Math.abs(ball.vx) > 1) ||
     gifts.some(gift => !gift.support) || garlands.some(garland => garland.rope.active > 0) ||
-    trees.some(tree => Math.abs(tree.tilt ?? 0) > .003 || Math.abs(tree.velocity ?? 0) > .02) ||
-    rain.fast();
+    trees.some(tree => tree.falling || Math.abs(tree.tilt ?? 0) > .003 ||
+      Math.abs(tree.velocity ?? 0) > .02) ||
+    rain.fast() || autumn.fast();
   if (sceneNeeded && (fastScene || sceneDirty || previousScene === undefined ||
       now - previousScene >= staticSceneInterval())) {
     const sceneDt = Math.min(.08, (now - (previousScene ?? now)) / 1000);
@@ -902,17 +1311,36 @@ function drawScene(now, dt) {
       ctx.clip('evenodd');
     }
   }
-  paintPiles(now);
-  rain.paint(ctx, rectangles);
+  // Clip only precipitation. Snowbanks remain visible above window top edges.
+  ctx.save();
+  clipPrecipitation(ctx, rectangles, width, height);
   if (!snowRenderer && particles.length) paintSnowFallback();
-  for (const p of accents) paintParticle(p, now);
+  for (const p of accents) if (p.kind === 'chunk') paintParticle(p, now);
+  ctx.restore();
+  paintPiles(now);
+  if (settings.weather === 'snow' && settings.iconsSnow && iconPiles.size) {
+    ctx.save();
+    // Keep shortcut snow behind any application window that covers it.
+    clipPrecipitation(ctx, rectangles, width, height);
+    paintIconSnow(ctx, iconPiles, now);
+    ctx.restore();
+  }
+  if (settings.weather === 'autumn') autumn.paint(ctx, now);
+  rain.paint(ctx, rectangles);
+  for (const p of accents) if (p.kind !== 'chunk' && p.kind !== 'santa') paintParticle(p, now);
+  ctx.save();
+  // Keep Santa, snowballs, the plough and decorations outside taskbar internals.
+  clipPrecipitation(ctx, taskbars, width, height);
+  for (const p of accents) if (p.kind === 'santa') paintParticle(p, now);
   paintSnowProps(now);
-  paintDecor(now, dt);
+  if (settings.weather !== 'autumn') paintDecor(now, dt);
+  ctx.restore();
   ctx.restore();
 }
 wintermas.onDesktop(desktop);
 wintermas.onSettings(configure);
 wintermas.onAction(action => {
+  if (settings.weather === 'rain' && ['clear', 'snowball', 'santa', 'reset', 'gather'].includes(action)) return;
   if (action?.placement === 'garland' || action?.placement === 'tree') {
     placement = { kind: action.placement, color: action.color, deadline: performance.now() + 25000 };
     return;
@@ -926,22 +1354,29 @@ wintermas.onAction(action => {
     }
   } else if (action === 'reset') {
     piles.clear();
+    iconPiles.clear();
+    iconDrag.reset();
+    movingWindowDrag = undefined;
+    movingWindowHoldUntil.clear();
     ground.profile.fill(0);
     ground.raster = undefined;
     particles = [];
     accents = [];
     balls = [];
     gifts = [];
+    santaPendingSnowmen.clear();
+    nextSantaVisitAt = 0;
     grabbed = undefined;
     plough = undefined;
     fraction = 0;
+    autumn.clear();
     cancelPlacement();
   } else if (action === 'clear') {
-    if (plough) return;
-    plough = { x: width + 70, heap: new Float32Array(34) };
+    startPlough();
   } else if (action === 'santa') {
-    accents.push({ kind: 'santa', x: -170, y: height * .42, age: 0,
-      duration: (width + 340) / 230, nextGift: 0, alpha: 1 });
+    const snowmen = balls.filter(root => !root.stack && !root.broken &&
+      stackMembers(root).length >= 3);
+    launchSantaVisit(snowmen.map(root => root.x));
   } else if (action === 'gather') {
     const pile = [...piles.values(), ground].find(candidate =>
       mouse.x >= candidate.rect.left && mouse.x < candidate.rect.right &&
@@ -954,13 +1389,17 @@ wintermas.onAction(action => {
     if (gathered < 3) return;
     for (let i = first; i < end; i++) pile.profile[i] *= .35;
     const size = Math.max(10, Math.min(26, Math.sqrt(gathered) * 3.8));
-    balls.push({ x: mouse.x, y: pile.rect.top - size, size, vx: 0, vy: 0,
-      support: pile.rect.id, previousSupport: pile.rect });
+    const ball = { x: mouse.x, y: pile.rect.top - size, size, vx: 0, vy: 0,
+      support: pile.rect.id, previousSupport: pile.rect };
+    keepBallAboveTaskbar(ball, taskbars, height);
+    balls.push(ball);
   } else if (action === 'snowball') {
     const ledge = rectangles.find(rect => !rect.taskbar && rect.top > height * 0.18 && rect.right - rect.left > 140);
     const x = ledge ? (Math.max(0, ledge.left) + Math.min(width, ledge.right)) / 2 : width * 0.45;
     const y = (ledge?.top ?? height * 0.72) - 95;
-    balls.push({ x, y, size: random(16, 23), vx: random(-22, 22), vy: -15 });
+    const ball = { x, y, size: random(15, 22), vx: random(-22, 22), vy: -15 };
+    keepBallAboveTaskbar(ball, taskbars, height);
+    balls.push(ball);
   }
   if (balls.length > 24) balls.splice(balls.findIndex(ball => ball !== grabbed), 1);
 });

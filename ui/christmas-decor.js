@@ -113,7 +113,8 @@ export function drawTree(ctx, x, y, color, now, tilt = 0) {
   treeSprite ??= makeTreeSprite();
   ctx.save();
   ctx.translate(x, y);
-  ctx.drawImage(treeSprite, 0, 220, 208, 36, -52, -15, 104, 18);
+  // The base of the pot ends at the contact line; no pixels below the taskbar.
+  ctx.drawImage(treeSprite, 0, 220, 208, 36, -52, -16, 104, 16);
   ctx.translate(0, -15);
   ctx.rotate(tilt);
   ctx.translate(0, 15);
