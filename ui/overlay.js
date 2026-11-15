@@ -1,5 +1,5 @@
 import { landing, bottomTaskbarAt } from './geometry.js';
-import { bottomExclusionMasks, bottomExcludedAt } from './window-exclusions.js';
+import { bottomExclusionMasks, bottomMaskedAt } from './window-exclusions.js';
 import { snowStep, snowStepInPlace } from './snow-motion.js';
 import { resizeProfile } from './snow-profile.js';
 import { drawPlough, drawSanta, drawSnowman, drawBall, makeSnowGrain } from './snow-art.js';
@@ -42,7 +42,7 @@ let width, height, previous, nextFrame, fraction = 0;
 let previousScene, sceneVisible = false;
 let settings = { enabled: false, intensity: 65, wind: 15, taskbar: true, paused: true };
 let rectangles = [], mouse = { x: -1000, y: -1000 }, particles = [], accents = [], balls = [];
-let taskbars = [];
+let taskbars = [], bottomMasks = [];
 let desktopIcons = [];
 const iconPiles = new Map();
 const iconDrag = createIconDragMonitor();
@@ -144,6 +144,7 @@ function resize() {
   autumn.resize(width, height);
   iconPiles.clear();
   iconDrag.reset();
+  bottomMasks = bottomExclusionMasks(rectangles,settings.bottomEdgeExcludeApps,height);
   sceneDirty = true;
   const rect = { id: 'ground', left: 0, right: width, top: height, bottom: height + 1 };
   ground = { rect, profile: new Float32Array(Math.ceil(width / column)), kind: 'snow' };
@@ -267,6 +268,7 @@ function desktop(frame) {
   }
   rectangles = frame.rectangles;
   taskbars = rectangles.filter(rect => rect.taskbar);
+  bottomMasks = bottomExclusionMasks(rectangles,settings.bottomEdgeExcludeApps,height);
   // Desktop shortcuts have their own tiny silhouette-following snowbanks.
   // Their bounds exclude text labels; when moved or removed they release
   // powder, rather than leaving frozen fragments on the wallpaper.
@@ -365,6 +367,7 @@ function configure(next) {
   }
   const diameterChanged = snowDiameter(settings.snowDiameter) !== snowDiameter(next.snowDiameter);
   settings = next;
+  bottomMasks = bottomExclusionMasks(rectangles,settings.bottomEdgeExcludeApps,height);
   // Icons are opt-in separately for each seasonal theme. Disabling a mode
   // immediately removes existing snow, wet glints, or leaves from shortcuts.
   if (!next.iconsSnow) { iconPiles.clear(); iconDrag.reset(); }
@@ -396,7 +399,7 @@ function addPile(hit, amount = 1) {
   // Excluded programs (SolidWorks, CAD editors, etc.) must not accumulate
   // hidden snow at the bottom while their window is open.
   if ((rect.taskbar || rect.id === 'ground') &&
-      bottomExcludedAt(rectangles, settings.bottomEdgeExcludeApps, x)) return;
+      bottomMaskedAt(bottomMasks, x)) return;
   // Do not paint a new ridge using an obsolete rectangle while moving.
   if (hideMovingWindowSnow(rect.id, movingWindowDrag, movingWindowHoldUntil,
       performance.now())) return;
@@ -803,17 +806,18 @@ function paintProfile(pile, covers, now) {
 }
 
 function paintPiles(now) {
-  const bottomMasks = bottomExclusionMasks(rectangles, settings.bottomEdgeExcludeApps, height);
-  // Ground effects are behind *every* app window, not in its content.
-  // Excluded apps additionally hide the entire lower-edge strip under them.
-  paintProfile(ground, [...rectangles, ...bottomMasks], now);
+  // The taskbar ridge is ON TOP of the taskbar, not inside window content.
+  // Do not allow normal app frames to erase this lower snowbank. Only an
+  // explicitly excluded app (if visibly exposed at the bottom) may mask it.
+  paintProfile(ground, [...taskbars, ...bottomMasks], now);
   // Do not paint stale piles for windows omitted by the native tracker.
   rectangles.forEach((rect, z) => {
     const pile = piles.get(rect.id);
     if (!pile || hideMovingWindowSnow(rect.id, movingWindowDrag,
         movingWindowHoldUntil, now)) return;
     const covers = rectangles.slice(0, z);
-    paintProfile(pile, rect.taskbar ? [...covers, ...bottomMasks] : covers, now);
+    paintProfile(pile, rect.taskbar ?
+      [...covers.filter(cover => cover.taskbar), ...bottomMasks] : covers, now);
   });
 }
 
@@ -1217,6 +1221,9 @@ function paintSnowProps(now) {
   for (const head of balls) {
     if (head.stack?.stack && !head.stack.stack.stack) drawSnowman(ctx, head, head.stack);
   }
+}
+
+function paintBottomPlough(now) {
   if (plough) {
     const x = Math.max(0, Math.min(width - 1, plough.x));
     // Draw the mound baseline at the taskbar edge. The old -4 offset left
@@ -1230,6 +1237,7 @@ function paintSnowProps(now) {
       drawPlough(ctx, plough.x, vehicleY, 0, snowGrain, now);
     } else drawPlough(ctx, plough.x, vehicleY, plough.load, snowGrain, now);
   }
+
 }
 
 // Paint flake sprites once. The soft edge keeps distant flakes from reading as white dots.
@@ -1346,18 +1354,22 @@ function drawScene(now, dt) {
     paintIconSnow(ctx, iconPiles, now);
     ctx.restore();
   }
-  if (settings.weather === 'autumn') autumn.paint(ctx, now,
-    bottomExclusionMasks(rectangles, settings.bottomEdgeExcludeApps, height));
+  if (settings.weather === 'autumn') autumn.paint(ctx, now, bottomMasks);
   rain.paint(ctx, rectangles);
   for (const p of accents) if (p.kind !== 'chunk' && p.kind !== 'santa') paintParticle(p, now);
+  // Snowballs, Christmas trees and decorations remain behind ALL apps.
   ctx.save();
-  // Everything interactive is also hidden inside application window content.
-  // Selected apps mask their bottom-edge effects down to the screen boundary.
-  clipPrecipitation(ctx, [...rectangles, ...bottomExclusionMasks(
-    rectangles, settings.bottomEdgeExcludeApps, height)], width, height);
-  for (const p of accents) if (p.kind === 'santa') paintParticle(p, now);
+  clipPrecipitation(ctx, rectangles, width, height);
   paintSnowProps(now);
   if (settings.weather !== 'autumn') paintDecor(now, dt);
+  ctx.restore();
+  // TASKBAR actors need a separate layer. The former shared window mask
+  // erased the plough/sleigh whenever an ordinary app occupied the work
+  // area above the taskbar, even while its snow ridge remained visible.
+  ctx.save();
+  clipPrecipitation(ctx, [...taskbars, ...bottomMasks], width, height);
+  for (const p of accents) if (p.kind === 'santa') paintParticle(p, now);
+  paintBottomPlough(now);
   ctx.restore();
   ctx.restore();
 }

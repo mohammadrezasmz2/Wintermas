@@ -16,13 +16,17 @@
   <img alt="Built with Electron" src="https://img.shields.io/badge/Built%20with-Electron-47848F">
 </p>
 
-**[Download latest Windows preview](https://github.com/mohammadrezasmz2/Wintermas/releases/tag/v0.2.1-preview.22)** · **[Product overview & FAQ](https://designclup.com/wintermas/)** · **[Watch demo](./demo/demo.mp4)** · **[Source for current preview features](https://github.com/mohammadrezasmz2/Wintermas/tree/fix/separate-weather-and-taskbar-art)**
+**[Download latest Windows preview](https://github.com/mohammadrezasmz2/Wintermas/releases/tag/v0.2.1-preview.23)** · **[Product overview & FAQ](https://designclup.com/wintermas/)** · **[Watch demo](./demo/demo.mp4)** · **[Source for current preview features](https://github.com/mohammadrezasmz2/Wintermas/tree/fix/separate-weather-and-taskbar-art)**
 
 Wintermas is a free-to-download, interactive **Windows desktop snowfall, rain and falling-leaves application**. Weather effects surround your existing windows instead of replacing your wallpaper. Snow settles on window ledges; autumn leaves accumulate in piles; snowballs, snowmen, Santa Claus and seasonal decorations make the desktop interactive.
 
+### Preview 23: visible snowplow on normal taskbars
+
+The snowplow, Santa sleigh, snowbanks and autumn leaf piles now render in a dedicated **taskbar-edge layer**. They remain visible when ordinary Windows applications are open, while weather particles and decorations are still masked out of application interiors. **CAD-specific exclusions now apply only to the visible portions of the selected app's bottom edge**, so an inactive SolidWorks window behind a different foreground app cannot make the snowplow disappear.
+
 ### NEW: hide bottom-edge effects in selected Windows applications
 
-Open Wintermas settings and expand **Hide bottom effects in selected apps**. Enter executable names, one per line (for example, `SLDWORKS.exe` or `Inventor.exe`). **SolidWorks is preconfigured.** While a matching window is open, snow and leaf accumulations at the bottom of its horizontal area are hidden, and falling particles and decorative objects stay out of application interiors. This affects the lower desktop edge; snow on allowed window tops remains available.
+Open Wintermas settings and expand **Hide bottom effects in selected apps**. Enter executable names, one per line (for example, `SLDWORKS.exe` or `Inventor.exe`). **SolidWorks is preconfigured.** While a matching window is visible at the bottom desktop edge, snow and leaf accumulations in that exposed area are hidden, and falling particles and decorative objects stay out of application interiors. This affects the lower desktop edge; snow on allowed window tops remains available.
 
 **Mouse behavior:** Ordinary clicks no longer spontaneously create snowballs near the pointer. Use **Make snowball** or the deliberate **Ctrl+click on a snowbank** interaction instead. In Rain mode, long straight wet-edge stripes are no longer drawn; animated raindrop impacts and brief splashes remain.
 
@@ -85,9 +89,9 @@ The **Weather on desktop icons** switch follows your selected theme, with **thre
 
 **Windows 64-bit (x64).** Download the **[latest available release](https://github.com/mohammadrezasmz2/Wintermas/releases)**, or get the current development preview:
 
-**[Wintermas v0.2.1 Preview 21 — download Windows setup (.exe)](https://github.com/mohammadrezasmz2/Wintermas/releases/download/v0.2.1-preview.22/Wintermas-Setup.exe)**
+**[Wintermas v0.2.1 Preview 21 — download Windows setup (.exe)](https://github.com/mohammadrezasmz2/Wintermas/releases/download/v0.2.1-preview.23/Wintermas-Setup.exe)**
 
-The preview release also provides a **[SHA-256 checksum](https://github.com/mohammadrezasmz2/Wintermas/releases/download/v0.2.1-preview.22/Wintermas-Setup.exe.sha256)**.
+The preview release also provides a **[SHA-256 checksum](https://github.com/mohammadrezasmz2/Wintermas/releases/download/v0.2.1-preview.23/Wintermas-Setup.exe.sha256)**.
 
 1. Download the EXE from this repository's official GitHub Releases.
 2. Check the SHA-256 digest against the published checksum if you wish to verify download integrity.
@@ -96,7 +100,7 @@ The preview release also provides a **[SHA-256 checksum](https://github.com/moha
 
 **Security:** Preview installers may be **unsigned**. A matching checksum confirms file integrity relative to the release, **not** that the software is safe. If antivirus reports a detection, investigate it rather than disabling security protections. You can uninstall Wintermas from **Windows Settings → Apps → Installed apps**.
 
-**Source code note:** The `main` branch contains the current development source for the three themes, icon weather controls and taskbar fixes. Each downloadable preview is frozen under its own [release tag](https://github.com/mohammadrezasmz2/Wintermas/releases); Preview 22 retains the Preview 18 icon recognition method and the weather-on-icons switches, and adds app-specific bottom-edge exclusions, cursor-snow safeguards and invisible rain wet-edge stripes.
+**Source code note:** The `main` branch contains the current development source for the three themes, icon weather controls and taskbar fixes. Each downloadable preview is frozen under its own [release tag](https://github.com/mohammadrezasmz2/Wintermas/releases); Preview 23 retains the Preview 18 icon recognition method and the weather-on-icons switches, and adds app-specific bottom-edge exclusions, cursor-snow safeguards and invisible rain wet-edge stripes.
 
 ## Frequently asked questions
 
@@ -131,7 +135,7 @@ To package the Windows installer:
 npm.cmd run build
 ```
 
-The NSIS build writes `dist/setup/Wintermas-Setup.exe`. To reproduce a specific preview installer, check out its release tag (for example, `git checkout v0.2.1-preview.22`) before building.
+The NSIS build writes `dist/setup/Wintermas-Setup.exe`. To reproduce a specific preview installer, check out its release tag (for example, `git checkout v0.2.1-preview.23`) before building.
 
 ## Project structure
 
