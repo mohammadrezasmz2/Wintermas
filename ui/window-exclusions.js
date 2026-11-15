@@ -21,18 +21,49 @@ export function isExcludedBottomApp(rect, entries) {
   return normalizeBottomEdgeApps(entries).includes(normalized);
 }
 
-// A selected CAD window hides the bottom decorations across its horizontal
-// footprint, even when its status bar ends a few pixels above the taskbar.
-// This is a drawing mask, not a global deletion of the user's accumulated snow.
+// Determine which APP is actually visible along the lower desktop edge.
+// EnumWindows/rectangles are ordered front-to-back; do not let a hidden
+// SolidWorks window suppress the plough when another maximized app covers it.
+import { safeBottomFloor } from './taskbar-actors.js';
+
 export function bottomExclusionMasks(rectangles, entries, height) {
-  if (!Array.isArray(entries) || !entries.length) return [];
-  return rectangles.filter(r=>isExcludedBottomApp(r,entries)).map(rect=>({
-    id:'bottom-exclusion-'+rect.id,
-    left:rect.left, right:rect.right, top:0,
-    bottom:height+64, taskbar:false
-  }));
+  const excluded=normalizeBottomEdgeApps(entries);
+  if (!excluded.length || !rectangles.length) return [];
+  const boundaries=new Set();
+  for (const rect of rectangles) {
+    if (rect.taskbar) continue;
+    boundaries.add(Math.max(0,rect.left));
+    boundaries.add(Math.max(0,rect.right));
+  }
+  const xs=[...boundaries].filter(Number.isFinite).sort((a,b)=>a-b);
+  const masks=[];
+  for(let i=0;i<xs.length-1;i++){
+    const left=xs[i],right=xs[i+1],x=(left+right)/2;
+    if (right-left<.1) continue;
+    const floor=safeBottomFloor(rectangles,x,height);
+    // Some app frames stop a handful of pixels before the work-area edge.
+    // Treat the closest visible app within 55px of that edge as foreground.
+    const first=rectangles.find(r=>!r.taskbar&&
+      x>=r.left && x<r.right && r.top<floor &&
+      r.bottom>=floor-55);
+    if (!first || !isExcludedBottomApp(first,excluded)) continue;
+    const previous=masks[masks.length-1];
+    if(previous && Math.abs(previous.right-left)<.1){
+      previous.right=right;
+    } else {
+      masks.push({id:'bottom-exclusion-'+first.id,
+        left,right,top:0,bottom:height+64,taskbar:false});
+    }
+  }
+  return masks;
 }
-export function bottomExcludedAt(rectangles, entries, x) {
-  return rectangles.some(rect=>x>=rect.left && x<rect.right &&
-    isExcludedBottomApp(rect,entries));
+
+export function bottomExcludedAt(rectangles, entries, x, height) {
+  const inferredHeight=height??Math.max(1,...rectangles.map(r=>r.bottom));
+  return bottomExclusionMasks(rectangles,entries,inferredHeight)
+    .some(r=>x>=r.left&&x<r.right);
+}
+
+export function bottomMaskedAt(masks,x) {
+  return masks.some(mask=>x>=mask.left&&x<mask.right);
 }

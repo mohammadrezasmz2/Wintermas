@@ -2,7 +2,7 @@
 // piles, plough pickup, and mouse vortex interaction. No snow/rain state is shared.
 import { landing, bottomTaskbarAt } from './geometry.js';
 import { clipPrecipitation } from './precipitation-mask.js';
-import { bottomExcludedAt } from './window-exclusions.js';
+import { bottomExclusionMasks, bottomMaskedAt } from './window-exclusions.js';
 import { iconSnowLanding, preferIconHit, iconContactY, iconRectChanged } from './desktop-icon-snow.js';
 import { createLeafSprites, drawLeaf, drawAutumnMound } from './autumn-art.js';
 import { advanceLeaf, pointerImpulse, sweepLeafItems, pileLayer,
@@ -200,6 +200,8 @@ export function createAutumn() {
       if(falling.length<target) falling.push(makeLeaf());
     }
     const wind=(settings.wind??0)*1.65;
+    // Compute exclusions once for this frame, not once per falling leaf.
+    const lowerMasks=bottomExclusionMasks(rectangles,settings.bottomEdgeExcludeApps,height);
     let kept=0;
     for(let i=0;i<falling.length;i++) {
       const leaf=falling[i];
@@ -212,7 +214,7 @@ export function createAutumn() {
       if(hit) {
         if(hit.icon) settleIcon(leaf,hit);
         else if ((hit.rect.taskbar || hit.rect.id === 'ground') &&
-          bottomExcludedAt(rectangles,settings.bottomEdgeExcludeApps,hit.x)) {
+          bottomMaskedAt(lowerMasks,hit.x)) {
           // Excluded app status bars stay completely clear of leaf litter.
         } else settle(leaf,hit.rect,hit.x);
         continue;
@@ -220,7 +222,7 @@ export function createAutumn() {
       if(leaf.y>=height && y0<=height) {
         const floor=floorAt(leaf.x);
         if ((floor.id==='ground'||settings.taskbar) &&
-            !bottomExcludedAt(rectangles,settings.bottomEdgeExcludeApps,leaf.x))
+            !bottomMaskedAt(lowerMasks,leaf.x))
           settle(leaf,floor,leaf.x);
         continue;
       }
@@ -313,12 +315,12 @@ export function createAutumn() {
     }
     // Settled leaves are visible on the TOP edges only; obey z-order.
     const ground=piles.get('ground');
-    if(ground) drawPile(ctx,ground,[...rectangles,...bottomMasks],now);
+    if(ground) drawPile(ctx,ground,[...taskbars,...bottomMasks],now);
     for(let i=rectangles.length-1;i>=0;i--) {
       const rect=rectangles[i];
       const pile=piles.get(rect.id);
       if(pile) drawPile(ctx,pile,rect.taskbar ?
-        [...rectangles.slice(0,i),...bottomMasks] : rectangles.slice(0,i),now);
+        [...rectangles.slice(0,i).filter(cover=>cover.taskbar),...bottomMasks] : rectangles.slice(0,i),now);
     }
   }
   function sweep(previousBlade,blade) {
