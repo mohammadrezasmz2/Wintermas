@@ -209,7 +209,7 @@ async function update(patch) {
   return snapshot;
 }
 
-function broadcastGeometry(windows, pressed, control, minimized = [], moving = null) {
+function broadcastGeometry(windows, pressed, control, minimized = [], moving = null, icons = []) {
   if (locked || !settings.enabled) return;
   const mouse = screen.getCursorScreenPoint();
   displayCache ??= new Map(screen.getAllDisplays().map(display => [display.id, display]));
@@ -246,7 +246,21 @@ function broadcastGeometry(windows, pressed, control, minimized = [], moving = n
       rectangles.unshift({ id: 'taskbar-fallback', left: 0, top: workBottom,
         right: width, bottom: height, taskbar: true });
     }
-    send(win, 'desktop', { rectangles, minimized, moving, mouse: { x: mouse.x - x, y: mouse.y - y, pressed, control } });
+    const desktopIcons = [];
+    for (const icon of icons) {
+      // Native UI Automation supplies physical-pixel icon image bounds and
+      // alpha top contours, never filenames. Convert to per-display DIP.
+      const left = (icon.left - origin.x) / scale;
+      const top = (icon.top - origin.y) / scale;
+      const right = (icon.right - origin.x) / scale;
+      const bottom = (icon.bottom - origin.y) / scale;
+      if (right > 0 && bottom > 0 && left < width && top < height) {
+        desktopIcons.push({ id: 'desktop-icon-' + icon.id,
+          left, top, right, bottom, contour: icon.contour });
+      }
+    }
+    send(win, 'desktop', { rectangles, icons: desktopIcons, minimized, moving,
+      mouse: { x: mouse.x - x, y: mouse.y - y, pressed, control } });
   }
 }
 
@@ -258,12 +272,12 @@ function startTracking() {
   const lines = createInterface({ input: worker.stdout });
   lines.on('line', line => {
     try {
-      const { windows, pressed, control, minimized = [], moving = null } = JSON.parse(line);
+      const { windows, pressed, control, minimized = [], moving = null, icons = [] } = JSON.parse(line);
       if (!tracking) {
         tracking = true;
         send(panel, 'desktop', { tracking });
       }
-      broadcastGeometry(windows, pressed, control, minimized, moving);
+      broadcastGeometry(windows, pressed, control, minimized, moving, icons);
     } catch (error) { console.error(error.message); }
   });
   worker.once('close', code => {

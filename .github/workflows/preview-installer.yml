@@ -77,7 +77,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: v0.2.1-preview.15
+          RELEASE_TAG: v0.2.1-preview.16
         run: |
-          gh release create $env:RELEASE_TAG 'dist/setup/Wintermas-Setup.exe' 'dist/setup/Wintermas-Setup.exe.sha256' --target $env:GITHUB_SHA --title 'Wintermas 0.2.1 Preview 15 — falling snow on window close' --prerelease --notes 'Preview 15: closing a window with the X button releases its accumulated snow as uniform-diameter falling powder before deleting the window snowbank. Minimizing works the same way; no ghost snow from inactive weather or taskbar state. Direct standard NSIS installer with install smoke test and SHA-256 checksum. IMPORTANT: unsigned preview; do not bypass antivirus warnings.'
+          gh release create $env:RELEASE_TAG 'dist/setup/Wintermas-Setup.exe' 'dist/setup/Wintermas-Setup.exe.sha256' --target $env:GITHUB_SHA --title 'Wintermas 0.2.1 Preview 16 — snow accumulation on desktop icons' --prerelease --notes 'Preview 16: snow now collects on real Windows desktop shortcut and folder ICONS, following their image alpha silhouette where available; labels remain clear, covered icons do not collect snow, and moving/deleting an icon releases powder. Uses safe UI Automation and shell icon APIs without Explorer injection. Direct NSIS installer with Windows smoke test and SHA-256 checksum. Direct standard NSIS installer with install smoke test and SHA-256 checksum. IMPORTANT: unsigned preview; do not bypass antivirus warnings.'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
