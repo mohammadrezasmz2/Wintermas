@@ -5,7 +5,7 @@ import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 
-const defaults = { enabled: false, intensity: 65, wind: 15, snowSpeed: 100, snowDiameter: 5, rainSpeed: 100, autumnSpeed: 100, taskbar: true, paused: true, startup: false, weather: 'snow' };
+const defaults = { enabled: false, intensity: 65, wind: 15, snowSpeed: 100, snowDiameter: 5, rainSpeed: 100, autumnSpeed: 100, taskbar: true, iconsSnow: true, iconsRain: true, iconsAutumn: true, paused: true, startup: false, weather: 'snow' };
 const collapsed = { width: 96, height: 54 };
 const expanded = { width: 342, height: 735 };
 const appPath = app.getAppPath();
@@ -183,7 +183,7 @@ async function update(patch) {
     const max = key === 'snowDiameter' ? 12 : key.endsWith('Speed') ? 250 : 100;
     settings[key] = Math.max(min, Math.min(max, patch[key]));
   }
-  for (const key of ['enabled', 'paused', 'taskbar', 'startup']) {
+  for (const key of ['enabled', 'paused', 'taskbar', 'startup', 'iconsSnow', 'iconsRain', 'iconsAutumn']) {
     if (typeof patch[key] === 'boolean') settings[key] = patch[key];
   }
   if (weathers.includes(patch.weather)) settings.weather = patch.weather;

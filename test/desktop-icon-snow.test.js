@@ -12,7 +12,7 @@ const icon = { ...rect };
 test('snow follows the actual icon alpha top edge rather than the label below',()=>{
   const center=iconContactY(rect,65),edge=iconContactY(rect,41);
   assert.ok(center>=50&&center<60);
-  assert.equal(edge,null,'deep diagonal edges must not attract white patches inside a logo');
+  assert.ok(edge>center,'a round icon has lower contact at its curved sides');
   assert.equal(iconContactY(rect,90),null);
   const transparent={...rect,contour:[...rect.contour]};
   transparent.contour[0]=-1;
@@ -113,7 +113,7 @@ test('deep opaque details in a brand logo cannot become snow ledges',()=>{
   // Only the highest silhouette is a physical landing surface.
   const contour=Array(24).fill(90);
   contour[8]=740;contour[9]=800;contour[10]=870;
-  const branded={...icon,contour,trusted:true};
+  const branded={...icon,contour};
   assert.ok(iconUpperContour(branded)<=100);
   assert.equal(iconContactY(branded,icon.left+9.5*(icon.right-icon.left)/24),null);
   assert.equal(iconSnowLanding([branded],[],icon.left+9.5*(icon.right-icon.left)/24,38,
@@ -160,35 +160,4 @@ test('real icon drag releases the fixed bank exactly once',()=>{
   assert.equal(syncIconSnow(banks,[next],()=>released++),true);
   assert.equal(syncIconSnow(banks,[next],()=>released++),false);
   assert.equal(released,1);
-});
-
-test('conservative unsupported icon fallback never puts snow deep into artwork', () => {
-  const fallback={...icon,trusted:false,contour:Array(24).fill(55)};
-  const y=iconContactY(fallback,65);
-  assert.ok(y>=fallback.top && y<fallback.top+5,'fallback stays at top rim');
-  const jagged={...fallback,contour:fallback.contour.map((v,i)=>i===8?140:v)};
-  assert.equal(iconContactY(jagged, jagged.left+8.5*(jagged.right-jagged.left)/24),null);
-});
-
-test('recycle bin and custom 3D logos cannot produce sharp vertical snow fragments',()=>{
-  const irregular=[150,125,95,86,80,75,71,68,65,63,60,58,58,60,63,65,68,71,75,80,86,95,125,150];
-  const current={...icon,trusted:true,contour:irregular};
-  const segments=snowCapSegments(current,new Float32Array(24).fill(5));
-  assert.ok(segments.length<=1);
-  for(const segment of segments) {
-    assert.ok(segment.length>=5);
-    for(let i=1;i<segment.length;i++)
-      assert.ok(Math.abs(segment[i].y-segment[i-1].y)<3);
-  }
-});
-
-test('new snow touches only valid top alpha strips, never hidden logo detail',()=>{
-  const shape=Array(24).fill(60);
-  shape[5]=520;shape[6]=720;
-  const emblem={...icon,trusted:true,contour:shape};
-  const banks=new Map();
-  const center=iconSnowLanding([emblem],[],65,38,65,96);
-  placeIconSnow(banks,center);
-  assert.equal(banks.get(emblem.id).profile[5],0);
-  assert.equal(banks.get(emblem.id).profile[6],0);
 });

@@ -94,6 +94,9 @@ function show(settings) {
   id('options').disabled = !settings.enabled;
   id('snow').checked = !settings.paused;
   id('taskbar').checked = settings.taskbar;
+  const iconKey = settings.weather === 'rain' ? 'iconsRain' :
+    settings.weather === 'autumn' ? 'iconsAutumn' : 'iconsSnow';
+  id('icon-weather').checked = settings[iconKey] === true;
   id('snow-diameter').value = settings.snowDiameter ?? 5;
   id('snow-diameter-value').textContent = id('snow-diameter').value + ' px';
   paint('snow-diameter');
@@ -131,6 +134,12 @@ document.addEventListener('keydown', event => {
 id('enabled').addEventListener('change', () => update({ enabled: id('enabled').checked }));
 id('snow').addEventListener('change', () => update({ paused: !id('snow').checked }));
 id('taskbar').addEventListener('change', () => update({ taskbar: id('taskbar').checked }));
+id('icon-weather').addEventListener('change', () => {
+  const weather = document.querySelector('input[name=weather]:checked')?.value ?? 'snow';
+  const key = weather === 'rain' ? 'iconsRain' :
+    weather === 'autumn' ? 'iconsAutumn' : 'iconsSnow';
+  update({ [key]: id('icon-weather').checked });
+});
 for (const key of ['intensity', 'wind']) {
   id(key).addEventListener('input', () => { id(key + '-value').textContent = id(key).value + ' %'; paint(key); });
   id(key).addEventListener('change', () => update({ [key]: Number(id(key).value) }));
@@ -192,6 +201,12 @@ function showWeather(settings) {
   document.querySelector('.decor').hidden = weather === 'autumn';
   id('taskbar-option').hidden = weather === 'rain';
   id('snow-diameter-option').hidden = weather !== 'snow';
+  const iconKey = weather === 'rain' ? 'iconsRain' :
+    weather === 'autumn' ? 'iconsAutumn' : 'iconsSnow';
+  id('icon-weather').checked = settings[iconKey] === true;
+  id('icon-weather-label').textContent = weather === 'rain' ?
+    'Rain on desktop icons' : weather === 'autumn' ?
+    'Leaves on desktop icons' : 'Snow on desktop icons';
   document.querySelector('#taskbar-option > span').textContent =
     weather === 'autumn' ? 'Leaves on the taskbar' : 'Snow on the taskbar';
   document.querySelector('.hint').textContent = weather === 'autumn'

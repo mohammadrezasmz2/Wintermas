@@ -121,7 +121,7 @@ function applyWeather(before, next) {
 }
 
 function updateWeather(dt) {
-  rain.update(dt, settings, rectangles);
+  rain.update(dt, settings, rectangles, settings.iconsRain ? desktopIcons : []);
   rain.draw(rectangles, settings.taskbar);
 }
 
@@ -255,7 +255,7 @@ function desktop(frame) {
   const elapsed = Math.max(0.012, (now - (lastDesktopSample ?? now)) / 1000);
   lastDesktopSample = now;
   if (placement || geometryChanged(rectangles, frame.rectangles)) sceneDirty = true;
-  if (settings.weather === 'snow' && frame.mouse) {
+  if (settings.weather === 'snow' && settings.iconsSnow && frame.mouse) {
     if (iconDrag.update(frame.mouse, desktopIcons, rectangles, now, id => {
       const pile = iconPiles.get(id);
       if (pile) {
@@ -269,18 +269,19 @@ function desktop(frame) {
   // Desktop shortcuts have their own tiny silhouette-following snowbanks.
   // Their bounds exclude text labels; when moved or removed they release
   // powder, rather than leaving frozen fragments on the wallpaper.
-  if (settings.weather === 'snow') {
-    const nextIcons = Array.isArray(frame.icons) ? frame.icons : [];
+  const nextIcons = Array.isArray(frame.icons) ? frame.icons : [];
+  if (settings.weather === 'snow' && settings.iconsSnow) {
     if (syncIconSnow(iconPiles, nextIcons, releaseIconBank) ||
         nextIcons.length !== desktopIcons.length) sceneDirty = true;
-    desktopIcons = nextIcons;
-  } else {
-    desktopIcons = [];
+  } else if (iconPiles.size) {
     iconPiles.clear();
+    sceneDirty = true;
   }
+  desktopIcons = nextIcons;
   updateWindowDrag(frame.mouse, now, frame.moving);
   if (settings.weather === 'autumn') {
-    autumn.syncGeometry(rectangles, frame.minimized);
+    autumn.syncGeometry(rectangles, frame.minimized,
+      settings.iconsAutumn ? desktopIcons : []);
     autumn.onPointer(frame.mouse, elapsed);
   } else updatePointer(frame.mouse, elapsed);
   mouse = frame.mouse;
@@ -363,6 +364,12 @@ function configure(next) {
   }
   const diameterChanged = snowDiameter(settings.snowDiameter) !== snowDiameter(next.snowDiameter);
   settings = next;
+  // Icons are opt-in separately for each seasonal theme. Disabling a mode
+  // immediately removes existing snow, wet glints, or leaves from shortcuts.
+  if (!next.iconsSnow) { iconPiles.clear(); iconDrag.reset(); }
+  if (!next.iconsRain) rain.clearIconWet();
+  if (!next.iconsAutumn) autumn.clearIconLeaves();
+  sceneDirty = true;
   if (diameterChanged) {
     setVisibleSnowDiameter(particles, accents, settings.snowDiameter);
     sceneDirty = true;
@@ -440,8 +447,8 @@ function updateParticles(dt) {
     }
   }
   const byId = new Map(rectangles.map(rect => [rect.id, rect]));
-  const landableIcons = desktopIcons.filter(icon =>
-    !iconDrag.isBlocked(icon.id, performance.now()));
+  const landableIcons = settings.iconsSnow ? desktopIcons.filter(icon =>
+    !iconDrag.isBlocked(icon.id, performance.now())) : [];
   const wind = settings.wind * 0.62;
   // In-place compaction: same rules as before, without a new array and motion object every frame.
   let kept = 0;
@@ -1311,7 +1318,7 @@ function drawScene(now, dt) {
   for (const p of accents) if (p.kind === 'chunk') paintParticle(p, now);
   ctx.restore();
   paintPiles(now);
-  if (settings.weather === 'snow' && iconPiles.size) {
+  if (settings.weather === 'snow' && settings.iconsSnow && iconPiles.size) {
     ctx.save();
     // Keep shortcut snow behind any application window that covers it.
     clipPrecipitation(ctx, rectangles, width, height);

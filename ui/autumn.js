@@ -2,6 +2,7 @@
 // piles, plough pickup, and mouse vortex interaction. No snow/rain state is shared.
 import { landing, bottomTaskbarAt } from './geometry.js';
 import { clipPrecipitation } from './precipitation-mask.js';
+import { iconSnowLanding, preferIconHit, iconContactY, iconRectChanged } from './desktop-icon-snow.js';
 import { createLeafSprites, drawLeaf, drawAutumnMound } from './autumn-art.js';
 import { advanceLeaf, pointerImpulse, sweepLeafItems, pileLayer,
   settledLeafOffset, leafPileProfile, settledLeafVisualSize } from './autumn-physics.js';
@@ -13,6 +14,7 @@ const COLUMN=6;
 export function createAutumn() {
   let width=0,height=0,time=0,fraction=0,ready=false;
   let falling=[],rectangles=[],taskbars=[],piles=new Map();
+  let desktopIcons=[],iconLeaves=new Map();
   let cursor={x:-10000,y:-10000};
   let sprites;
 
@@ -52,8 +54,9 @@ export function createAutumn() {
       flip:random(-.55,.55),
     });
   }
+  function clearIconLeaves() { iconLeaves.clear(); desktopIcons=[]; }
   function clear() {
-    falling=[]; piles.clear(); fraction=0;ready=false;
+    falling=[]; piles.clear(); clearIconLeaves(); fraction=0;ready=false;
     time=0;
     cursor={x:-10000,y:-10000};
   }
@@ -63,9 +66,25 @@ export function createAutumn() {
     clear();
     spritesReady();
   }
-  function syncGeometry(next,minimized=[]) {
+  function syncGeometry(next,minimized=[],icons=[]) {
     rectangles=next;
     taskbars=rectangles.filter(r=>r.taskbar);
+    desktopIcons=icons;
+    const availableIcons = new Map(icons.map(icon=>[icon.id,icon]));
+    for(const [id,pile] of iconLeaves) {
+      const nextIcon=availableIcons.get(id);
+      if(!nextIcon || iconRectChanged(pile.icon,nextIcon)) {
+        // Moved or removed shortcuts shake their leaves loose.
+        if(nextIcon) for(const item of pile.items) {
+          if(falling.length>=MAX_LEAVES) break;
+          const leaf=makeLeaf(pile.icon.top-8);
+          leaf.x=item.x;leaf.size=item.size;leaf.variant=item.variant;
+          leaf.vx=random(-80,80);leaf.vy=-random(35,85);
+          falling.push(leaf);
+        }
+        iconLeaves.delete(id);
+      }
+    }
     const byId=new Map(rectangles.map(r=>[r.id,r]));
     for(const [id,pile] of piles) {
       if(id==='ground') continue;
@@ -104,6 +123,17 @@ export function createAutumn() {
       pile.items=pile.items.filter(p=>p.offset>=0&&p.offset<span);
     }
   }
+  function settleIcon(leaf, hit) {
+    const icon=hit.icon;
+    let pile=iconLeaves.get(icon.id);
+    if(!pile) { pile={icon:{...icon,contour:[...icon.contour]},items:[]};iconLeaves.set(icon.id,pile); }
+    if(pile.items.length>=16) pile.items.shift();
+    pile.items.push({
+      x:hit.x,variant:leaf.variant,size:Math.min(10.5,Math.max(5.5,leaf.size*.70)),
+      angle:random(-1.1,1.1),offset:random(-1.8,1.8)
+    });
+  }
+
   function onPointer(next,dt) {
     if(!next||!Number.isFinite(next.x)||!Number.isFinite(next.y)) return;
     const old=cursor;cursor={x:next.x,y:next.y};
@@ -116,6 +146,20 @@ export function createAutumn() {
     if(speed<45) return;
     // Movement swirls already falling leaves in either direction.
     for(const leaf of falling) pointerImpulse(leaf,next,vx,vy,115);
+    if(speed>105) for(const pile of iconLeaves.values()) {
+      for(let i=pile.items.length-1;i>=0;i--) {
+        const item=pile.items[i];
+        const y=iconContactY(pile.icon,item.x);
+        if(y===null||Math.hypot(next.x-item.x,next.y-y)>48||Math.random()>.5)continue;
+        pile.items.splice(i,1);
+        if(falling.length>=MAX_LEAVES) continue;
+        const leaf=makeLeaf(y-5);leaf.x=item.x;
+        leaf.size=item.size;leaf.variant=item.variant;
+        leaf.vx=Math.max(-240,Math.min(240,vx*.25+random(-40,40)));
+        leaf.vy=-random(80,200);
+        falling.push(leaf);
+      }
+    }
     if(speed<105) return;
     let lofted=0;
     for(const pile of piles.values()) {
@@ -160,9 +204,13 @@ export function createAutumn() {
       const leaf=falling[i];
       const x0=leaf.x,y0=leaf.y;
       advanceLeaf(leaf,step,wind,time);
-      const hit=landing(rectangles,x0,y0,leaf.x,leaf.y,settings.taskbar);
+      const hit=preferIconHit(
+        landing(rectangles,x0,y0,leaf.x,leaf.y,settings.taskbar),
+        settings.iconsAutumn ?
+          iconSnowLanding(desktopIcons,rectangles,x0,y0,leaf.x,leaf.y):null);
       if(hit) {
-        settle(leaf,hit.rect,hit.x);
+        if(hit.icon) settleIcon(leaf,hit);
+        else settle(leaf,hit.rect,hit.x);
         continue;
       }
       if(leaf.y>=height && y0<=height) {
@@ -243,6 +291,20 @@ export function createAutumn() {
         leaf.angle,leaf.flip,.92);
     }
     ctx.restore();
+    // Leaves sitting on exposed desktop icon artwork: tiny caps, not labels.
+    if(iconLeaves.size) {
+      ctx.save();
+      clipPrecipitation(ctx,rectangles,width,height);
+      for(const pile of iconLeaves.values()) {
+        for(const item of pile.items) {
+          const y=iconContactY(pile.icon,item.x);
+          if(y===null)continue;
+          drawLeaf(ctx,atlas[item.variant],item.x+item.offset,
+            y-item.size*.28,item.size,item.angle,0,.88,.86);
+        }
+      }
+      ctx.restore();
+    }
     // Settled leaves are visible on the TOP edges only; obey z-order.
     const ground=piles.get('ground');
     if(ground) drawPile(ctx,ground,rectangles,now);
@@ -266,11 +328,12 @@ export function createAutumn() {
     return n>=110;
   }
   return {
-    resize,clear,syncGeometry,onPointer,update,paint,sweep,needsSweep,
-    active:()=>falling.length>0||[...piles.values()].some(p=>p.items.length>0),
+    resize,clear,syncGeometry,onPointer,update,paint,sweep,needsSweep,clearIconLeaves,
+    active:()=>falling.length>0||iconLeaves.size>0||[...piles.values()].some(p=>p.items.length>0),
     fast:()=>falling.length>0,
     drawMound:(ctx,x,y,load,now)=>drawAutumnMound(ctx,spritesReady(),x,y,load,now),
     stats:()=>({falling:falling.length,settled:[...piles.values()].reduce((s,p)=>s+p.items.length,0),
+      iconLeaves:[...iconLeaves.values()].reduce((s,p)=>s+p.items.length,0),
       piles:piles.size}),
   };
 }

@@ -1,6 +1,7 @@
 // Rain weather: falling streaks, splashes on window edges, wet edges that drip at the corners.
 // Self-contained so the snow code paths stay untouched; overlay.js only calls the methods below.
 import { landing } from './geometry.js';
+import { iconSnowLanding, preferIconHit, iconContactY, iconRectChanged } from './desktop-icon-snow.js';
 import { createRainRenderer, RAIN_GPU_BUDGET } from './rain-renderer.js';
 import { clipPrecipitation } from './precipitation-mask.js';
 
@@ -13,6 +14,7 @@ export function createRain(canvas) {
   let width = 0, height = 0, scale = 1;
   let drops = [], splashes = [], fraction = 0, ready = false;
   const wet = new Map();
+  const iconWet = new Map();
 
   canvas.addEventListener('webglcontextlost', () => {
     renderer = null;
@@ -58,7 +60,13 @@ export function createRain(canvas) {
     wet.set(id, entry);
   }
 
-  function update(dt, settings, rectangles) {
+  function update(dt, settings, rectangles, icons = []) {
+    if (!settings.iconsRain) iconWet.clear();
+    const visible = new Map(icons.map(icon => [icon.id, icon]));
+    for (const [id, entry] of iconWet) {
+      const next = visible.get(id);
+      if (!settings.iconsRain || !next || iconRectChanged(entry.icon, next)) iconWet.delete(id);
+    }
     const raining = settings.enabled && settings.weather === 'rain' && !settings.paused && settings.intensity > 0;
     const speed = Math.max(0.25, Math.min(2.5, (settings.rainSpeed ?? 100) / 100));
     if (raining) {
@@ -88,10 +96,21 @@ export function createRain(canvas) {
       d.x += d.vx * dt * speed;
       d.y += d.vy * dt * speed;
       if (!d.foreground) {
-        const hit = landing(rectangles, x0, y0, d.x, d.y, settings.taskbar);
+        const hit = preferIconHit(
+          landing(rectangles, x0, y0, d.x, d.y, settings.taskbar),
+          settings.iconsRain ? iconSnowLanding(icons, rectangles, x0, y0, d.x, d.y) : null);
         if (hit) {
-          splash(hit.x, hit.rect.top, d);
-          wetten(hit.rect.id);
+          if (hit.icon) {
+            const previous = iconWet.get(hit.icon.id);
+            iconWet.set(hit.icon.id, {
+              icon: previous?.icon ?? hit.icon, x: hit.x,
+              level: Math.min(1, (previous?.level ?? 0) + 0.055),
+            });
+            splash(hit.x, hit.y, d);
+          } else {
+            splash(hit.x, hit.rect.top, d);
+            wetten(hit.rect.id);
+          }
           continue;
         }
       }
@@ -126,6 +145,11 @@ export function createRain(canvas) {
       splashes[kept++] = s;
     }
     splashes.length = kept;
+
+    for (const [id, entry] of iconWet) {
+      entry.level -= dt * (raining ? .055 : .22);
+      if (entry.level <= .018) iconWet.delete(id);
+    }
 
     if (wet.size) {
       const present = new Map(rectangles.map(rect => [rect.id, rect]));
@@ -170,6 +194,38 @@ export function createRain(canvas) {
       ctx.fillRect(rect.left, top + 1, rect.right - rect.left, 1.6);
       ctx.restore();
     }
+  }
+
+  function paintWetIcons(ctx, rectangles) {
+    if (!iconWet.size) return;
+    ctx.save();
+    clipPrecipitation(ctx, rectangles, width, height);
+    ctx.lineCap = 'round';
+    for (const entry of iconWet.values()) {
+      const icon = entry.icon;
+      const span = icon.right - icon.left;
+      const n = Math.max(8, icon.contour?.length ?? 24);
+      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = `rgba(175, 211, 242, ${(entry.level * .50).toFixed(3)})`;
+      ctx.beginPath();
+      let drawing = false;
+      for (let i = 0; i < n; i++) {
+        const x = icon.left + (i+.5)*span/n;
+        const y = iconContactY(icon, x);
+        if (y === null) { drawing = false; continue; }
+        if (!drawing) ctx.moveTo(x,y-1.2);
+        else ctx.lineTo(x,y-1.2);
+        drawing = true;
+      }
+      ctx.stroke();
+      const x = Math.min(icon.right-1,Math.max(icon.left+1,entry.x));
+      const y = iconContactY(icon,x);
+      if (y !== null) {
+        ctx.fillStyle = `rgba(209, 235, 255, ${(entry.level*.60).toFixed(3)})`;
+        ctx.beginPath();ctx.ellipse(x,y-1.5,1.9,1.15,0,0,Math.PI*2);ctx.fill();
+      }
+    }
+    ctx.restore();
   }
 
   function paintSplashes(ctx) {
@@ -240,19 +296,23 @@ export function createRain(canvas) {
       if (splashes.length) paintSplashes(ctx);
       ctx.restore();
       if (wet.size) paintWetEdges(ctx, rectangles);
+      if (iconWet.size) paintWetIcons(ctx, rectangles);
     },
     clear() {
       drops = [];
       splashes = [];
       wet.clear();
+      iconWet.clear();
       fraction = 0;
       ready = false;
       renderer?.clear();
     },
-    active: () => drops.length > 0 || splashes.length > 0 || wet.size > 0,
-    needsScene: () => splashes.length > 0 || wet.size > 0 || (!renderer && drops.length > 0),
+    clearIconWet: () => iconWet.clear(),
+    active: () => drops.length > 0 || splashes.length > 0 || wet.size > 0 || iconWet.size > 0,
+    needsScene: () => splashes.length > 0 || wet.size > 0 || iconWet.size > 0 || (!renderer && drops.length > 0),
     fast: () => splashes.length > 0 || (!renderer && drops.length > 0),
     stats: () => ({ drops: drops.length, splashes: splashes.length, wet: wet.size,
+      wetIcons: iconWet.size,
       backend: renderer ? 'webgl' : triedRenderer ? 'canvas2d' : 'idle' }),
   };
 }

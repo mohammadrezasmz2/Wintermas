@@ -26,15 +26,12 @@ export function iconContactY(icon, x) {
   if (crest === null || !Number.isFinite(sample) || sample < 0 || sample > 1000) return null;
   const h = icon.bottom - icon.top;
   const drop = (sample - crest) * h / 1000;
-  // Shell art sometimes has tall corners, deep logo cutouts and diagonal
-  // shoulders.  The old 12-16px tolerance painted those *interior* features
-  // and made a jagged snow crown on Recycle Bin and 3D app icons.
-  const limit = icon.trusted === false ? 1.8 : Math.min(5.5, Math.max(3.5, h * .065));
-  if (drop < -.2 || drop > limit) return null;
-  // Stay outside the top visible pixels with a shallow, curved support line.
-  // Never let an alpha notch pull a snow cap far down into an application logo.
-  const topCrest = icon.top + h * crest / 1000 - 1.6;
-  return topCrest + Math.min(2.4, drop * .52);
+  // Only the outer top silhouette can accumulate. Never trace interior gaps,
+  // image highlights or icons' internal artwork as if they were snowy surfaces.
+  if (drop > Math.min(16, Math.max(12, h * .16)) + 0.01) return null;
+  // Keep the contact just *above* opaque icon pixels to avoid a white slash
+  // inside the app image on high-DPI screens.
+  return icon.top + h * sample / 1000 - 1.1;
 }
 
 export function iconObscuredByWindow(windows, x, y) {
