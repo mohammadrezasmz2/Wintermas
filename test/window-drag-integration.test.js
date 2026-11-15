@@ -11,7 +11,8 @@ test('native desktop tracker transmits the HWND of an active Win32 move', async 
 test('Electron forwards native move events to the renderer', async () => {
   const main=await readFile(new URL('../main.js',import.meta.url),'utf8');
   assert.match(main,/moving = null, icons = \[\] \} = JSON\.parse\(line\)/);
-  assert.match(main,/minimized, moving, mouse:/);
+  assert.match(main,/minimized, moving,/);
+  assert.match(main,/icons: desktopIcons/);
 });
 test('renderer hides stale window snow immediately and releases powder on drag', async () => {
   const overlay=await readFile(new URL('../ui/overlay.js',import.meta.url),'utf8');
