@@ -1,51 +1,112 @@
 <p align="center">
-  <img src="./ui/icon.png" width="120" alt="Wintermas logo">
+  <img src="./ui/icon.png" width="112" alt="Wintermas — free seasonal desktop effects for Windows">
 </p>
 
-<h1 align="center">Wintermas</h1>
-
-<p align="center">An interactive Christmas desktop widget for Windows.</p>
+<h1 align="center">Wintermas — Interactive Desktop Snow, Rain & Autumn for Windows</h1>
 
 <p align="center">
-  <img alt="Windows x64" src="https://img.shields.io/badge/Platform-Windows%20x64-0078D4">
-  <img alt="Electron" src="https://img.shields.io/badge/Built%20with-Electron-47848F?logo=electron&amp;logoColor=white">
-  <img alt="Version 0.2.0" src="./.github/version.svg">
+  <strong>Turn your Windows desktop into a living winter, rainy day, or autumn scene.</strong><br>
+  Free, independent, KoiArt-inspired desktop effects with snowmen, Santa, Christmas decorations, leaf piles and an animated snowplow.
 </p>
 
-Wintermas brings snowfall and Christmas decorations to your existing desktop. Snow settles on window edges and can spill when you move or resize a window. The widget controls the effects and can be tucked away in the Windows system tray.
+<p align="center">
+  <a href="https://github.com/mohammadrezasmz2/Wintermas/releases"><img alt="Download free Windows installer" src="https://img.shields.io/badge/Download-Windows%20x64%20installer-3778C2"></a>
+  <img alt="Snow, Rain, Autumn" src="https://img.shields.io/badge/Themes-Snow%20%7C%20Rain%20%7C%20Autumn-C08A40">
+  <img alt="Free for noncommercial use" src="https://img.shields.io/badge/License-PolyForm%20Noncommercial-448465">
+  <img alt="Built with Electron" src="https://img.shields.io/badge/Built%20with-Electron-47848F">
+</p>
 
-## Demo
+**[Download latest Windows preview](https://github.com/mohammadrezasmz2/Wintermas/releases/tag/v0.2.1-preview.14)** · **[Product overview & FAQ](https://designclup.com/wintermas/)** · **[Watch demo](./demo/demo.mp4)** · **[Source for current preview features](https://github.com/mohammadrezasmz2/Wintermas/tree/fix/separate-weather-and-taskbar-art)**
 
-[![Watch the Wintermas desktop demo](./demo/preview.jpg)](./demo/demo.mp4)
+Wintermas is a free-to-download, interactive **Windows desktop snowfall, rain and falling-leaves application**. Weather effects surround your existing windows instead of replacing your wallpaper. Snow settles on window ledges; autumn leaves accumulate in piles; snowballs, snowmen, Santa Claus and seasonal decorations make the desktop interactive.
 
-[Watch or download the 47-second demo (MP4)](./demo/demo.mp4)
+> **Independent project, not an official KoiArt product.** Wintermas is an unofficial Windows alternative **inspired by** [KoiArt](https://koiart.app/), not made, sponsored, or endorsed by KoiArt. "Free" here means free to download and use **for permitted noncommercial purposes** under the repository's [PolyForm Noncommercial 1.0.0 license](./LICENSE). Commercial use requires separate permission.
 
-## Install
+## Preview
 
-1. Get **Wintermas-Setup.exe** from [Releases](../../releases) when a build is available, or [build the installer](#build-from-source) locally.
-2. Run the installer, choose a folder and select **Open Wintermas** when it finishes.
-3. Click the Wintermas icon near the clock and turn on **Christmas mode**, then **Snowfall**.
+[![Watch Wintermas winter desktop animation and snow effects](./demo/preview.jpg)](./demo/demo.mp4)
 
-The installer targets Windows x64 and uses Microsoft Edge WebView2 for its interface. It installs for your Windows account. You can remove Wintermas through **Settings → Apps → Installed apps**.
+[Watch / download the desktop demo video (MP4)](./demo/demo.mp4). *The existing demo shows the winter experience; autumn, expanded animations and controls are part of newer preview builds.*
 
-## What you can do
+## Features: three independent seasonal weather themes
 
-| Feature | How to use it |
+### ❄️ Snow — interactive winter and Christmas effects
+
+- **Snowfall on Windows:** animated particles drift over the desktop and accumulate on open-window edges and above the taskbar. Effects are masked over app contents.
+- **Custom controls:** adjust snowfall intensity, snow speed, wind and **snowflake diameter (2–12 px)**.
+- **Window movement:** moving or minimizing a window can dislodge its snow into small falling powder particles instead of leaving a rigid white line.
+- **Snowballs and snowmen:** roll snowballs with the mouse, throw them, and **stack three balls to build a snowman**.
+- **Santa Claus & gifts:** send Santa's sleigh across the lower desktop; completed snowmen can trigger visits and gifts nearby. Without snowmen, Santa can leave a Christmas tree.
+- **Automatic snowplow:** the animated plow pushes accumulated snow and can collect snowballs, snowmen, gifts and trees. It can start automatically when enough snow builds up.
+- **Christmas decorations:** hang garlands, customize light colors, place Christmas trees and interact with gifts.
+
+### 🌧️ Rain — animated desktop rain
+
+- Switch to a separate Rain theme with falling raindrops and splashes.
+- See water interact with window edges, including wet surfaces and dripping effects.
+- Adjust rain speed and intensity. Switching modes clears the previous mode's effects.
+
+### 🍁 Autumn — realistic-looking falling leaves
+
+- Yellow, orange, red and brown **maple, oak and oval leaves** rotate and flutter in the wind.
+- Leaves gather into layered, irregular piles on window ledges and along the bottom of the desktop.
+- **Interact with leaves using the mouse:** swipe through falling leaves or disturb settled piles to throw them back into the air.
+- Send the snowplow as a **leaf sweeper** to collect leaf piles, with an animated pile at its blade.
+- Adjust leaf speed, intensity and wind independently from Snow and Rain.
+
+## How to use Wintermas
+
+| Action | What to do |
 | --- | --- |
-| Snowfall | Adjust **Intensity** and **Wind** in the panel. Snow can collect on open windows. **Snow on the taskbar** is on by default and has its own toggle. |
-| Snowballs and snowmen | Use **Make snowball**, or click and drag across a snowbank to roll a ball. Drag and release a ball to throw it. Stack three snowballs to make a snowman. |
-| Santa and gifts | Select **Send Santa** to watch the sleigh fly across the desktop and drop gifts. |
-| Snowplow | Select **Snowplow** to clear snow along the taskbar. Use **Reset snow** to clear accumulated snow. |
-| Garlands | Choose a light palette or custom color, then select **Hang garland**. Click to place the first anchor, use **Ctrl + click** to add anchors, and click to finish. |
-| Christmas trees | Select **Place tree**, then click where you want it. **Clear decorations** removes the decorations you placed. |
-| Rain | Choose **Rain** under the weather switch (or **Weather → Rain** in the tray menu). Drops splash on window edges, wet edges drip at the corners, and settled snow slowly melts. |
-| System tray | Wintermas lives in the system tray. Click its icon near the clock to open the panel; it closes when you click elsewhere. Right-click the icon to switch weather, open the diagnostic log or quit. |
+| Switch seasons | Open the Wintermas tray icon and select **Snow**, **Rain**, or **Autumn**. |
+| Tune effects | Use the panel's intensity, wind, speed and (in Snow) snow diameter controls. |
+| Make a snowball | Choose **Make snowball**, or click and drag along an accumulated snowbank. |
+| Build a snowman | Move and stack three snowballs. |
+| Send Santa | Select **Send Santa**; Santa can also visit automatically after a snowman is finished. |
+| Clear snow or leaves | Select the snowplow / leaf sweeper; accumulation may also trigger automatic cleanup. |
+| Decorate | Choose **Place tree** or **Hang garland** and place decorations with the mouse. |
+| Play with leaves | In Autumn, move the cursor rapidly near falling or settled leaves. |
+| Open settings | Use the Windows system tray icon; the app can stay out of the way when the panel is closed. |
 
-**Shortcut.** Press **Alt + Shift + B** over a snowbank to gather snow into a ball.
+**Snowball shortcut:** `Alt + Shift + B` over a snowbank.
+
+## Download and install
+
+**Windows 64-bit (x64).** Download the **[latest available release](https://github.com/mohammadrezasmz2/Wintermas/releases)**, or get the current development preview:
+
+**[Wintermas v0.2.1 Preview 14 — download Windows setup (.exe)](https://github.com/mohammadrezasmz2/Wintermas/releases/download/v0.2.1-preview.14/Wintermas-Setup.exe)**
+
+The preview release also provides a **[SHA-256 checksum](https://github.com/mohammadrezasmz2/Wintermas/releases/download/v0.2.1-preview.14/Wintermas-Setup.exe.sha256)**.
+
+1. Download the EXE from this repository's official GitHub Releases.
+2. Check the SHA-256 digest against the published checksum if you wish to verify download integrity.
+3. Install Wintermas and launch it from Windows.
+4. Open the tray icon and enable your favorite theme.
+
+**Security:** Preview installers may be **unsigned**. A matching checksum confirms file integrity relative to the release, **not** that the software is safe. If antivirus reports a detection, investigate it rather than disabling security protections. You can uninstall Wintermas from **Windows Settings → Apps → Installed apps**.
+
+**Source code note:** The repository's default `main` branch tracks the earlier project. The **[preview development branch](https://github.com/mohammadrezasmz2/Wintermas/tree/fix/separate-weather-and-taskbar-art)** contains newer Autumn, snow physics and taskbar fixes shown in the preview installer. Check the exact release when comparing features.
+
+## Frequently asked questions
+
+**Is Wintermas the free version of KoiArt?**  
+No. Wintermas is a **free, independent, unofficial KoiArt-inspired alternative for Windows**, not an official KoiArt edition or affiliated product.
+
+**Is Wintermas really free?**  
+The downloadable application is offered at no cost for permitted noncommercial use. Source-code use and redistribution are subject to [PolyForm Noncommercial 1.0.0](./LICENSE); commercial use is not automatically permitted.
+
+**Can snow collect on top of app windows?**  
+Yes. In Snow mode, snowbanks can settle on the upper edges of open windows, and window movement can shake particles loose. Rendering may vary by application and Windows configuration.
+
+**Can I make snowmen and interact with leaves?**  
+Yes. Stack snowballs into snowmen in Snow mode, or move your mouse through loose leaves and leaf piles in Autumn mode.
+
+**Does it run on macOS?**  
+Wintermas targets **Windows x64**. KoiArt is a separate product for macOS.
 
 ## Build from source
 
-Build on Windows x64 with Node.js 22.12 or later, npm and the .NET Framework 4.x C# compiler. The installer build uses Windows PowerShell, `curl.exe` and `tar.exe` and downloads the pinned WebView2 SDK from NuGet. To use a local copy of that SDK, set `WINTERMAS_WEBVIEW2_SDK` to the path of its `.nupkg` file.
+Build on Windows x64 with Node.js 22 or newer, npm and the Windows .NET Framework compiler used by the native helper:
 
 ```powershell
 npm.cmd ci
@@ -53,36 +114,35 @@ npm.cmd exec -- install-electron
 npm.cmd start
 ```
 
-To package the app and build its installer:
+To package the Windows installer:
 
 ```powershell
 npm.cmd run build
 ```
 
-The build writes `dist/setup/Wintermas-Setup.exe`. Keep the generated `dist` folder out of Git.
+The NSIS build writes `dist/setup/Wintermas-Setup.exe`. To build the newer three-theme preview, check out `fix/separate-weather-and-taskbar-art` first.
 
-## Release a new version
+## Project structure
 
-Update the version with `npm version patch --no-git-tag-version` (or choose `minor` or `major`). Update the version shown in the local badge at `.github/version.svg` and its alt text in this README, then commit and push to `main`. GitHub Actions skips versions with an existing `vX.Y.Z` tag. For a new version, it builds the installer and publishes it in a GitHub Release with a tag pointing to the built commit.
-
-## Project layout
-
-| Path | Purpose |
+| Location | Purpose |
 | --- | --- |
-| `main.js`, `preload.cjs` | Electron windows, settings, system tray and communication with the interface |
-| `ui/` | Widget interface, desktop overlay, snow effects and decoration artwork |
-| `native/` | Windows helper that tracks window and taskbar geometry |
-| `setup/`, `scripts/` | WebView2 installer interface and build scripts |
-| `demo/` | Desktop demo video and preview image |
+| `main.js`, `preload.cjs` | Electron app, settings, system tray, native overlay integration |
+| `ui/` | Weather renderers, seasonal artwork, interaction and widget interface |
+| `native/` | Windows helper tracking window and taskbar geometry |
+| `scripts/`, `setup/` | Build and packaging tooling |
+| `test/` | Behavior and regression tests in preview development |
+| `demo/` | Existing demo and screenshot |
 
-## License
+## License, credits and attribution
 
-Copyright © amiayweb.
+Wintermas is based on the source-available [amiayweb/Wintermas](https://github.com/amiayweb/Wintermas) project; **credit and the original copyright notice remain with amiayweb**. This fork adds Autumn, additional seasonal interactions, rendering changes and Windows taskbar fixes.
 
-Wintermas source code is available under the [PolyForm Noncommercial License 1.0.0](./LICENSE). You may use, modify, and share the software for permitted noncommercial purposes under the terms of the license. Commercial use requires separate permission from amiayweb.
+Source code is licensed under [PolyForm Noncommercial 1.0.0](./LICENSE). This repository is not affiliated with, endorsed by or an official version of KoiArt.
 
-## Acknowledgments
+---
 
-Wintermas was inspired by [KoiArt](https://koiart.app/), a desktop effects app for macOS.
+### معرفی فارسی Wintermas
 
-This version is based on [amiayweb/Wintermas](https://github.com/amiayweb/Wintermas) and adds the rain theme, smoother vsync-paced rendering, a tray flyout panel and a diagnostic log (see [CHANGELOG.md](./CHANGELOG.md)).
+**وینترمس (Wintermas)** نرم‌افزاری رایگان برای استفاده غیرتجاری در ویندوز است که دسکتاپ را با سه تم **برفی، بارانی و پاییزی** زنده می‌کند. می‌توانی سرعت و قطر برف را تغییر بدهی، روی لبه پنجره‌ها برف جمع کنی، گلوله برفی بسازی، سه گلوله را تبدیل به **آدم‌برفی** کنی و با **بابانوئل، هدیه‌ها، درخت کریسمس، چراغ‌های تزئینی و ماشین برف‌روب** تعامل داشته باشی. در پاییز، برگ‌ها روی هم جمع می‌شوند و به حرکت ماوس واکنش نشان می‌دهند. Wintermas یک جایگزین مستقل، الهام‌گرفته از ایده KoiArt برای ویندوز است و نسخه رسمی KoiArt نیست.
+
+**[دانلود Wintermas برای ویندوز](https://github.com/mohammadrezasmz2/Wintermas/releases)** · **[معرفی کامل نرم‌افزار](https://designclup.com/wintermas/)**
