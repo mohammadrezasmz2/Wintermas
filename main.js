@@ -6,7 +6,7 @@ import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 
-const defaults = { enabled: false, intensity: 65, wind: 15, snowSpeed: 100, snowDiameter: 5, rainSpeed: 100, autumnSpeed: 100, taskbar: true, iconsSnow: true, iconsRain: true, iconsAutumn: true, bottomEdgeExcludeApps: ['SLDWORKS.exe'], paused: true, startup: false, weather: 'snow' };
+const defaults = { enabled: true, intensity: 65, wind: 15, snowSpeed: 100, snowDiameter: 5, rainSpeed: 100, autumnSpeed: 100, taskbar: true, iconsSnow: true, iconsRain: true, iconsAutumn: true, bottomEdgeExcludeApps: ['SLDWORKS.exe'], paused: false, startup: true, weather: 'snow' };
 const collapsed = { width: 96, height: 54 };
 const expanded = { width: 342, height: 735 };
 const appPath = app.getAppPath();
@@ -176,6 +176,17 @@ function syncVisibility() {
   }
 }
 
+function syncLoginStartup() {
+  // Register on first launch as well as when the user changes the preference.
+  // Do not write a login item during installer smoke tests.
+  if (process.argv.includes('--smoke-test')) return;
+  app.setLoginItemSettings({
+    openAtLogin: settings.startup,
+    args: packagedEntry,
+    path: process.env.PORTABLE_EXECUTABLE_FILE || process.execPath,
+  });
+}
+
 async function update(patch) {
   if (!patch || typeof patch !== 'object') return settings;
   for (const key of ['intensity', 'wind', 'snowSpeed', 'snowDiameter', 'rainSpeed', 'autumnSpeed']) {
@@ -190,13 +201,7 @@ async function update(patch) {
   if ('bottomEdgeExcludeApps' in patch) settings.bottomEdgeExcludeApps = normalizeBottomEdgeApps(patch.bottomEdgeExcludeApps);
   if (weathers.includes(patch.weather)) settings.weather = patch.weather;
   diagnostics.write('info', 'settings', 'changed', patch);
-  if ('startup' in patch) {
-    app.setLoginItemSettings({
-      openAtLogin: settings.startup,
-      args: packagedEntry,
-      path: process.env.PORTABLE_EXECUTABLE_FILE || process.execPath,
-    });
-  }
+  if ('startup' in patch) syncLoginStartup();
   const snapshot = { ...settings };
   send(panel, 'settings:changed', snapshot);
   for (const win of overlays.values()) send(win, 'settings:changed', snapshot);
@@ -401,6 +406,7 @@ async function start() {
   settings.bottomEdgeExcludeApps = normalizeBottomEdgeApps(settings.bottomEdgeExcludeApps);
   if (!weathers.includes(settings.weather)) settings.weather = defaults.weather;
   if (process.argv.includes('--smoke-test')) settings = { ...defaults };
+  else syncLoginStartup();
   await diagnostics.start({ settings, displays: screen.getAllDisplays().map(display => ({ id: display.id,
     bounds: display.bounds, scale: display.scaleFactor, hz: display.displayFrequency })) });
   const area = screen.getPrimaryDisplay().workArea;
