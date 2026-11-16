@@ -1137,12 +1137,12 @@ function rollOnSnow(ball, point, travel) {
 function updateBallPointer(next, dt) {
 
   const hovered = balls.findLast(ball => Math.hypot(ball.x - next.x, ball.y - next.y) <= ball.size + 3);
-  // Clicking ordinary GUI controls must never create snow from the pointer.
-  // Creating a new ball from a snowbank requires an explicit Ctrl+click;
-  // the existing Make Snowball button still works without this shortcut.
-  const snow = next.control ? snowAt(next) : null;
+  // A click directly on a visible snowbank starts a ball without a modifier.
+  // snowAt restricts interception to the thin accumulated ridge rather than
+  // the underlying window's ordinary control area.
+  const snow = snowAt(next);
   if (!next.pressed || grabbed) capturePointer(Boolean(grabbed || hovered || snow));
-  if (next.pressed && !mouse.pressed && (hovered || (next.control && snow))) {
+  if (next.pressed && !mouse.pressed && (hovered || snow)) {
     const root = hovered && stackRoot(hovered);
     const assembled = root && stackMembers(root).length >= 3;
     grabbed = assembled ? root : hovered;
