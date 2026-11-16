@@ -35,11 +35,12 @@ test('masks span full bottom region and respect an app window horizontal footpri
   assert.equal(bottomExclusionMasks([browser],['SLDWORKS.exe'],1080).length,0);
 });
 
-test('normal mouse click does not create an accidental snowball; Ctrl+click still works',async()=>{
+test('dragging directly on a snowbank makes snowballs without Ctrl, but ordinary controls do not',async()=>{
   const {readFile}=await import('node:fs/promises');
   const source=await readFile(new URL('../ui/overlay.js',import.meta.url),'utf8');
-  assert.match(source,/const snow = next\.control \? snowAt\(next\) : null/);
-  assert.match(source,/next\.control && snow/);
+  assert.match(source,/const snow = snowAt\(next\)/);
+  assert.match(source,/\(hovered \|\| snow\)/);
+  assert.match(source,/point\.y >= pile\.rect\.top - depth - tolerance/);
   assert.match(source,/else if \(action === 'snowball'\)/);
 });
 
@@ -73,7 +74,7 @@ test('native window enumeration includes process basename for app exclusions',as
   assert.match(native,/Process\.GetProcessById\(/);
   assert.match(native,/processName/);
   assert.match(main,/processName: rect\.processName \?\? ''/);
-  assert.match(main,/bottomEdgeExcludeApps: \['SLDWORKS\.exe'\]/);
+  assert.match(main,/bottomEdgeExcludeApps: \['SLDWORKS\.exe', 'acad\.exe'\]/);
   assert.match(panel,/bottom-edge-exclude-apps/);
 });
 

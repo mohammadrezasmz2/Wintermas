@@ -18,6 +18,7 @@
     </header>
     <main id="menu" hidden>
       <label class="switch master"><span>Christmas mode<small>Bring the desktop to life</small></span><input id="enabled" type="checkbox"></label>
+      <label class="switch secondary"><span>Launch with Windows<small>Start automatically when you sign in</small></span><input id="startup" type="checkbox"></label>
       <fieldset id="options" disabled>
         <section class="controls" aria-label="Snow settings">
           <div class="weather" role="radiogroup" aria-label="Weather">
@@ -37,8 +38,8 @@
           <summary>Hide bottom effects in selected apps</summary>
           <label for="bottom-edge-exclude-apps">Executable names, one per line</label>
           <textarea id="bottom-edge-exclude-apps" rows="3" spellcheck="false"
-            placeholder="SLDWORKS.exe&#10;Inventor.exe"></textarea>
-          <p>Suppress bottom snow, leaf piles and decorations while these apps are visible. Example: SLDWORKS.exe.</p>
+            placeholder="SLDWORKS.exe&#10;acad.exe"></textarea>
+          <p>Suppress bottom snow, leaf piles and decorations while these apps are visible. Examples: SLDWORKS.exe and acad.exe (AutoCAD).</p>
         </details>
         <section id="snow-actions" class="group" aria-label="Christmas animations">
           <h2>Snow day</h2>
@@ -70,7 +71,7 @@
             <button data-action="decor-reset"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>Clear decorations</button>
           </div>
         </section>
-        <p class="hint">Click and drag across a snowbank to roll a snowball.</p>
+        <p class="hint">Click and drag a snowbank to make a snowball. Roll it through snow to grow it, then stack three snowballs to build a snowman.</p>
       </fieldset>
       <button id="hide-widget" type="button"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.500 6l4.500 4.500L12.500 6"/></svg>Close</button>
       <p id="message" role="status"></p>

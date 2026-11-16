@@ -13,7 +13,7 @@ import { createPerfMonitor } from './perf-monitor.js';
 import { clipPrecipitation } from './precipitation-mask.js';
 import { shedOnWindowMotion, naturalSnowHeights, keepBallAboveTaskbar, canStackBall, needsAutoPlough, sweepSnowProfile, bladeTouchesBall } from './snow-behavior.js';
 import { santaStops, bladeCrosses, isOnBottomSurface } from './santa-visit.js';
-import { shouldReleaseWindowSnow } from './window-snow.js';
+import { shouldReleaseWindowSnow, isFullscreenSnowWindow, planFullscreenSnowfall } from './window-snow.js';
 import { shakeSnowOffWindow } from './window-powder.js';
 import { titlebarWindowAt, draggedEnough, hideMovingWindowSnow } from './window-drag.js';
 import { ploughBaselineForFloor, santaCenterForFloor, safeBottomFloor } from './taskbar-actors.js';
@@ -57,6 +57,7 @@ let heldTree, frameRequest;
 const garlands = [], trees = [];
 let gifts = [];
 const piles = new Map();
+const pendingFullscreenSnow = [];
 const celebratedSnowmen = new WeakSet();
 const santaPendingSnowmen = new Set();
 let nextSantaVisitAt = 0;
@@ -108,6 +109,7 @@ function applyWeather(before, next) {
   plough = undefined;
   fraction = 0;
   piles.clear();
+  pendingFullscreenSnow.length = 0;
   iconPiles.clear();
   iconDrag.reset();
   movingWindowDrag = undefined;
@@ -184,6 +186,16 @@ function spill(pile, avoidId = null) {
     const y = pile.rect.top - depth / count - random(2, 9);
     releaseSnow(x, y, depth * 0.9, random(-85, 85), random(-90, -12), avoidId);
   }
+}
+
+// On fullscreen close/minimize, release a few natural snowflakes at a time.
+// A regular-sized window still uses the original instantaneous powder spill.
+function queueFullscreenSnowfall(pile) {
+  const now = performance.now();
+  for (const event of planFullscreenSnowfall(pile, column)) {
+    pendingFullscreenSnow.push({ ...event, due: now + event.delay, remaining: event.count });
+  }
+  pendingFullscreenSnow.sort((a, b) => a.due - b.due);
 }
 
 // React to titlebar input, not only window-geometry events. This protects
@@ -297,7 +309,10 @@ function desktop(frame) {
       // A disappearing window must NEVER take its accumulated snow with it.
       // Release its last visible bank into independent particles first, then
       // delete the now-invalid HWND pile. Includes both Close and Minimize.
-      if (shouldReleaseWindowSnow(pile, next, settings)) spill(pile, id);
+      if (shouldReleaseWindowSnow(pile, next, settings)) {
+        if (isFullscreenSnowWindow(pile.rect, width, height)) queueFullscreenSnowfall(pile);
+        else spill(pile, id);
+      }
       piles.delete(id);
       movingWindowHoldUntil.delete(id);
       sceneDirty = true;
@@ -360,6 +375,7 @@ function configure(next) {
       if (pile.rect.taskbar) piles.delete(id);
     }
   }
+  if (next.paused || !next.enabled) pendingFullscreenSnow.length = 0;
   if (next.paused && !settings.paused) {
     particles = [];
     fraction = 0;
@@ -432,6 +448,18 @@ function spawnFlake() {
 }
 
 function updateParticles(dt) {
+  if (settings.weather === 'snow' && pendingFullscreenSnow.length) {
+    const now = performance.now();
+    const budget = snowRenderer ? 950 : 360;
+    while (pendingFullscreenSnow.length && pendingFullscreenSnow[0].due <= now && particles.length < budget) {
+      const entry = pendingFullscreenSnow[0];
+      const flake = spawnFlake();
+      flake.x = entry.x + random(-9, 9);
+      flake.y = entry.y - random(1, 14);
+      particles.push(flake);
+      if (--entry.remaining === 0) pendingFullscreenSnow.shift();
+    }
+  }
   if (settings.weather === 'autumn') {
     autumn.update(dt, settings);
     updateAutumnPlough(dt);
@@ -1137,12 +1165,12 @@ function rollOnSnow(ball, point, travel) {
 function updateBallPointer(next, dt) {
 
   const hovered = balls.findLast(ball => Math.hypot(ball.x - next.x, ball.y - next.y) <= ball.size + 3);
-  // Clicking ordinary GUI controls must never create snow from the pointer.
-  // Creating a new ball from a snowbank requires an explicit Ctrl+click;
-  // the existing Make Snowball button still works without this shortcut.
-  const snow = next.control ? snowAt(next) : null;
+  // A click directly on a visible snowbank starts a ball without a modifier.
+  // snowAt restricts interception to the thin accumulated ridge rather than
+  // the underlying window's ordinary control area.
+  const snow = snowAt(next);
   if (!next.pressed || grabbed) capturePointer(Boolean(grabbed || hovered || snow));
-  if (next.pressed && !mouse.pressed && (hovered || (next.control && snow))) {
+  if (next.pressed && !mouse.pressed && (hovered || snow)) {
     const root = hovered && stackRoot(hovered);
     const assembled = root && stackMembers(root).length >= 3;
     grabbed = assembled ? root : hovered;
@@ -1390,6 +1418,7 @@ wintermas.onAction(action => {
     }
   } else if (action === 'reset') {
     piles.clear();
+    pendingFullscreenSnow.length = 0;
     iconPiles.clear();
     iconDrag.reset();
     movingWindowDrag = undefined;

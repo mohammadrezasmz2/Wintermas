@@ -30,7 +30,7 @@ await build({
       perMachine: false,
       allowToChangeInstallationDirectory: true,
       differentialPackage: false,
-      runAfterFinish: false,
+      runAfterFinish: true,
     },
   },
 });
