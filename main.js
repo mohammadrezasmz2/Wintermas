@@ -2,11 +2,13 @@ import { app, BrowserWindow, Menu, Tray, nativeImage, screen, ipcMain, powerMoni
 import { createDiagnostics } from './diagnostics.js';
 import { spawn } from 'node:child_process';
 import { normalizeBottomEdgeApps } from './ui/window-exclusions.js';
-import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, stat, unlink } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { migratePreferences, startupShortcutPath, isWintermasExecutable,
+  isLegacyWintermasLoginItem } from './ui/startup-config.js';
 
-const defaults = { enabled: true, intensity: 65, wind: 15, snowSpeed: 100, snowDiameter: 5, rainSpeed: 100, autumnSpeed: 100, taskbar: true, iconsSnow: true, iconsRain: true, iconsAutumn: true, bottomEdgeExcludeApps: ['SLDWORKS.exe'], paused: false, startup: true, weather: 'snow' };
+const defaults = { enabled: true, intensity: 65, wind: 15, snowSpeed: 100, snowDiameter: 5, rainSpeed: 100, autumnSpeed: 100, taskbar: true, iconsSnow: true, iconsRain: true, iconsAutumn: true, bottomEdgeExcludeApps: ['SLDWORKS.exe', 'acad.exe'], paused: false, startup: true, weather: 'snow', startupPreferenceVersion: 1, cadExclusionsVersion: 1 };
 const collapsed = { width: 96, height: 54 };
 const expanded = { width: 342, height: 735 };
 const appPath = app.getAppPath();
@@ -18,7 +20,6 @@ let trayHintShown = false;
 let quitting = false, locked = false, tracking = false;
 let save = Promise.resolve();
 const overlays = new Map();
-const packagedEntry = process.defaultApp ? [app.getAppPath(), '--quiet'] : ['--quiet'];
 const weathers = ['snow', 'rain', 'autumn'];
 let displayCache;
 const diagnostics = createDiagnostics(app);
@@ -176,19 +177,42 @@ function syncVisibility() {
   }
 }
 
-function syncLoginStartup() {
-  // Register on first launch as well as when the user changes the preference.
-  // Do not write a login item during installer smoke tests.
-  if (process.argv.includes('--smoke-test')) return;
-  app.setLoginItemSettings({
-    openAtLogin: settings.startup,
-    args: packagedEntry,
-    path: process.env.PORTABLE_EXECUTABLE_FILE || process.execPath,
+async function syncLoginStartup() {
+  // Only Wintermas.lnk is created or removed, never other apps' entries.
+  if (process.platform !== 'win32' || !app.isPackaged || process.argv.includes('--smoke-test')) return;
+  const shortcut = startupShortcutPath(app.getPath('appData'));
+  const found = await stat(shortcut).then(() => true, error => {
+    if (error.code === 'ENOENT') return false;
+    throw error;
   });
+  if (found && !isWintermasExecutable(shell.readShortcutLink(shortcut).target)) {
+    throw new Error('The Wintermas startup shortcut is not owned by Wintermas; left untouched.');
+  }
+  if (settings.startup) {
+    await mkdir(dirname(shortcut), { recursive: true });
+    if (!shell.writeShortcutLink(shortcut, 'create', {
+      target: process.execPath, args: '--quiet', cwd: dirname(process.execPath),
+      description: 'Launch Wintermas at Windows sign-in',
+    })) throw new Error('Windows could not create the Wintermas startup shortcut.');
+    if (!isWintermasExecutable(shell.readShortcutLink(shortcut).target)) {
+      throw new Error('Wintermas startup shortcut verification failed.');
+    }
+  } else if (found) {
+    await unlink(shortcut);
+  }
+  // Remove only the legacy Wintermas per-user Run entry if it belongs to
+  // this app. No other application's startup registration is touched.
+  const old = app.getLoginItemSettings({ path: process.execPath, args: ['--quiet'] });
+  if ((old.launchItems ?? []).some(isLegacyWintermasLoginItem)) {
+    app.setLoginItemSettings({
+      name: 'Wintermas', openAtLogin: false, path: process.execPath, args: ['--quiet'],
+    });
+  }
 }
 
 async function update(patch) {
   if (!patch || typeof patch !== 'object') return settings;
+  const beforeStartup = settings.startup;
   for (const key of ['intensity', 'wind', 'snowSpeed', 'snowDiameter', 'rainSpeed', 'autumnSpeed']) {
     if (!Number.isFinite(patch[key])) continue;
     const min = key === 'wind' ? -100 : key === 'snowDiameter' ? 2 : key.endsWith('Speed') ? 25 : 0;
@@ -201,7 +225,10 @@ async function update(patch) {
   if ('bottomEdgeExcludeApps' in patch) settings.bottomEdgeExcludeApps = normalizeBottomEdgeApps(patch.bottomEdgeExcludeApps);
   if (weathers.includes(patch.weather)) settings.weather = patch.weather;
   diagnostics.write('info', 'settings', 'changed', patch);
-  if ('startup' in patch) syncLoginStartup();
+  if ('startup' in patch) {
+    try { await syncLoginStartup(); }
+    catch (error) { settings.startup = beforeStartup; throw error; }
+  }
   const snapshot = { ...settings };
   send(panel, 'settings:changed', snapshot);
   for (const win of overlays.values()) send(win, 'settings:changed', snapshot);
@@ -398,8 +425,10 @@ async function start() {
   const data = app.getPath('userData');
   await mkdir(data, { recursive: true });
   settingsFile = join(data, 'settings.json');
+  let storedSettings;
   try {
     const stored = JSON.parse(await readFile(settingsFile, 'utf8'));
+    storedSettings = stored;
     settings = Object.fromEntries(Object.entries(defaults).map(([key, value]) =>
       [key, typeof stored[key] === typeof value ? stored[key] : value]));
     trayHintShown = true; // the "where did it go" hint is only for the very first run
@@ -407,8 +436,16 @@ async function start() {
   catch (error) { if (error.code !== 'ENOENT') console.error(error.message); }
   settings.bottomEdgeExcludeApps = normalizeBottomEdgeApps(settings.bottomEdgeExcludeApps);
   if (!weathers.includes(settings.weather)) settings.weather = defaults.weather;
+  const migration = migratePreferences(settings, storedSettings);
+  settings = migration.settings;
   if (process.argv.includes('--smoke-test')) settings = { ...defaults };
-  else syncLoginStartup();
+  else {
+    if (migration.changed) {
+      await writeFile(settingsFile + '.tmp', JSON.stringify(settings, null, 2));
+      await rename(settingsFile + '.tmp', settingsFile);
+    }
+    await syncLoginStartup().catch(error => console.error('Wintermas startup setup:', error));
+  }
   await diagnostics.start({ settings, displays: screen.getAllDisplays().map(display => ({ id: display.id,
     bounds: display.bounds, scale: display.scaleFactor, hz: display.displayFrequency })) });
   const area = screen.getPrimaryDisplay().workArea;
