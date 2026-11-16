@@ -91,6 +91,7 @@ function report(error) {
 function show(settings) {
   document.body.classList.toggle('enabled', settings.enabled);
   id('enabled').checked = settings.enabled;
+  id('startup').checked = settings.startup === true;
   id('options').disabled = !settings.enabled;
   id('snow').checked = !settings.paused;
   id('taskbar').checked = settings.taskbar;
@@ -135,6 +136,7 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape') wintermas.hideWidget().catch(report);
 });
 id('enabled').addEventListener('change', () => update({ enabled: id('enabled').checked }));
+id('startup').addEventListener('change', () => update({ startup: id('startup').checked }));
 id('snow').addEventListener('change', () => update({ paused: !id('snow').checked }));
 id('taskbar').addEventListener('change', () => update({ taskbar: id('taskbar').checked }));
 id('bottom-edge-exclude-apps').addEventListener('change', () => {
