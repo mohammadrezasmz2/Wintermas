@@ -74,7 +74,7 @@ test('native window enumeration includes process basename for app exclusions',as
   assert.match(native,/Process\.GetProcessById\(/);
   assert.match(native,/processName/);
   assert.match(main,/processName: rect\.processName \?\? ''/);
-  assert.match(main,/bottomEdgeExcludeApps: \['SLDWORKS\.exe'\]/);
+  assert.match(main,/bottomEdgeExcludeApps: \['SLDWORKS\.exe', 'acad\.exe'\]/);
   assert.match(panel,/bottom-edge-exclude-apps/);
 });
 
