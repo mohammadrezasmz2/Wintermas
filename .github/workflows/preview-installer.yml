@@ -3,7 +3,7 @@ name: Build Wintermas preview installer
 on:
   push:
     branches:
-      - fix/separate-weather-and-taskbar-art
+      - fix/persist-weather-autostart-snowballs
 
 permissions:
   contents: write
@@ -77,7 +77,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: v0.2.1-preview.23
+          RELEASE_TAG: v0.2.1-preview.24
         run: |
-          gh release create $env:RELEASE_TAG 'dist/setup/Wintermas-Setup.exe' 'dist/setup/Wintermas-Setup.exe.sha256' --target $env:GITHUB_SHA --title 'Wintermas 0.2.1 Preview 23 — restore snowplough and taskbar piles outside CAD' --prerelease --notes 'Preview 23: fixes regression where ordinary application window masks hid the snowplough, Santa and taskbar snow while the sweep continued. Taskbar snow, leaf piles and moving actors now use a dedicated taskbar clip; window content still masks other effects. A background SolidWorks window no longer suppresses bottom decorations while a normal window covers it; exclusions apply only to exposed bottom-edge app spans. Includes regression tests for foreground and partially occluded CAD windows. Includes conservative fallback instead of inventing deep icon contours. Preserves instant icon-drag shedding and stable anchors. Previous instant mouse-drag powder shedding preserved. Uses safe UI Automation and shell icon APIs without Explorer injection. Direct NSIS installer with Windows smoke test and SHA-256 checksum. Direct standard NSIS installer with install smoke test and SHA-256 checksum. IMPORTANT: unsigned preview; do not bypass antivirus warnings.'
+          gh release create $env:RELEASE_TAG 'dist/setup/Wintermas-Setup.exe' 'dist/setup/Wintermas-Setup.exe.sha256' --target $env:GITHUB_SHA --title 'Wintermas 0.2.1 Preview 24 - autostart, snowballs, gentle fullscreen snow' --prerelease --notes 'Preview 24: enabled weather on first install with automatic Windows login startup; preserve user weather settings across restarts; run after installer completion; restore drag-to-gather snowballs and snowman building; minimize or close fullscreen windows with gradual fine snowflakes instead of an instantaneous bank dump while preserving the existing normal-window snow release. Includes regression tests and a Windows installation smoke test. Unsigned preview: verify source and hash; do not bypass antivirus security alerts.'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
