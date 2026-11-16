@@ -312,12 +312,14 @@ async function smokeTest() {
       const actions = menu.querySelectorAll('[data-action]').length;
       const iconReady = toggle.querySelector('img').naturalWidth > 0;
       const options = document.querySelector('#options');
-      const disabledByDefault = options.disabled;
+      const enabledByDefault = !options.disabled;
+      await wintermas.update({ enabled: false });
+      const disabledAfterToggle = options.disabled;
       await wintermas.update({ enabled: true, paused: false });
       const enabledAfterToggle = !options.disabled;
       const bottom = menu.getBoundingClientRect().bottom;
       const height = innerHeight;
-      return { open, actions, iconReady, bottom, height, disabledByDefault, enabledAfterToggle };
+      return { open, actions, iconReady, bottom, height, enabledByDefault, disabledAfterToggle, enabledAfterToggle };
     })()`);
     const flyout = panel.getBounds();
     const flyoutArea = screen.getDisplayMatching(flyout).workArea;
@@ -345,7 +347,7 @@ async function smokeTest() {
       })()`
     )));
     const panelReady = insideWorkArea && panelCheck.iconReady && panelCheck.open &&
-      panelCheck.disabledByDefault && panelCheck.enabledAfterToggle &&
+      panelCheck.enabledByDefault && panelCheck.disabledAfterToggle && panelCheck.enabledAfterToggle &&
       panelCheck.actions === 9 && panelCheck.bottom <= panelCheck.height;
     if (!tracking || !panelReady || !renderers.length || !renderers.every(Boolean)) {
       throw new Error(JSON.stringify({ tracking, panelCheck, renderers }));
